@@ -4,22 +4,24 @@ from livekit.agents import (
     JobContext,
     WorkerOptions,
     cli,
-    llm
+    llm,
 )
 from livekit.agents.voice import Agent, AgentSession
 from livekit.plugins import openai
 from dotenv import load_dotenv
 from flask import Flask
-from server import build_postgres_uri
-from db_driver import db
-from api import AssistantFnc, db_driver
-from prompts import INSTRUCTIONS, WELCOME_MESSAGE, CONSULTATION_START
+
+from app.config import build_postgres_uri
+from app.extensions import db
+from app.models import User
+from app.tools.middleware import MiddlewareTools
+from app.prompts import build_system_prompt
 import os
 import logging
 
 load_dotenv()
 
-logger = logging.getLogger("medical-agent")
+logger = logging.getLogger("agent")
 logger.setLevel(logging.INFO)
 
 
@@ -31,49 +33,55 @@ def init_database():
     app = Flask("lia-agent-db")
     app.config["SQLALCHEMY_DATABASE_URI"] = build_postgres_uri()
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-    db_driver.init_app(app)
+    db.init_app(app)
     return app
 
 
 async def entrypoint(ctx: JobContext):
-    """Main entry point for the medical consultation agent"""
+    """Main entry point for the multi-tenant Lia agent."""
     app = init_database()
     # Ensure all DB operations in this job run within the Flask app context
     with app.app_context():
         await ctx.connect(auto_subscribe=AutoSubscribe.SUBSCRIBE_ALL)
         await ctx.wait_for_participant()
-        
-        # Derive doctor_id from job metadata or participant identity.
+
+        # Derive user_id from job metadata or participant identity.
         metadata = ctx.job.metadata or {}
-        doctor_id = metadata.get("doctor_id")
-        
-        # Fallback: parse doctor UUID from participant identity: "doctor_<doctorId>_<patientId>"
-        if not doctor_id:
-            for p in ctx.room.remote_participants.values():
-                ident = getattr(p, "identity", "") or ""
-                if ident.startswith("doctor_"):
-                    parts = ident.split("_", 2)
-                    if len(parts) >= 2:
-                        doctor_id = parts[1]
-                        break
-        
-        logger.info(f"Starting consultation session for doctor_id: {doctor_id}")
-        
+        user_id = metadata.get("user_id")
+
+        logger.info(f"Starting consultation session for user_id: {user_id}")
+
+        # Resolve user + organization for multi-tenant configuration
+        user = User.query.get(user_id) if user_id else None
+        org = getattr(user, "organization", None) if user else None
+
+        org_name = org.name if org and getattr(org, "name", None) else "your organization"
+        org_industry = getattr(org, "industry", None) if org else None
+        connector_config = getattr(org, "connector_config", None) if org else None
+        prompt_overrides = (connector_config or {}).get("prompt_overrides") if connector_config else None
+
+        instructions = build_system_prompt(
+            org_name=org_name,
+            org_industry=org_industry,
+            extra_rules=prompt_overrides,
+        )
+
         # Initialize the AI model
         model = openai.realtime.RealtimeModel(
             voice="marin",
             temperature=0.8,
             modalities=["audio", "text"]
         )
-        
-        # Initialize assistant functions with doctor context
-        assistant_fnc = AssistantFnc(doctor_id=doctor_id)
-        
-        # Create agent with medical instructions and tools
+
+        # Industry-agnostic tools: generic meeting + history only
+        middleware_tools = MiddlewareTools(user_id)
+        tools = middleware_tools.get_tools()
+
+        # Create agent with dynamic, industry-aware instructions and tools
         agent = Agent(
-            instructions=INSTRUCTIONS,
+            instructions=instructions,
             llm=model,
-            tools=assistant_fnc.get_tools()
+            tools=tools,
         )
         
         # Create and start session
@@ -81,7 +89,7 @@ async def entrypoint(ctx: JobContext):
         await session.start(agent, room=ctx.room)
         
         # Session is now running; the model will respond to speech from the room
-        logger.info("Medical consultation agent started successfully")
+        logger.info("Lia Start sucessfully")
 
 
 if __name__ == "__main__":
