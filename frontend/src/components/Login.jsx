@@ -3,12 +3,9 @@ import { api } from '../lib/api';
 import './Login.css';
 
 export default function Login({ onLoginSuccess }) {
-  const [isLogin, setIsLogin] = useState(true);
   const [formData, setFormData] = useState({
     email: '',
     password: '',
-    org_id: '',
-    role: 'user',
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -23,29 +20,35 @@ export default function Login({ onLoginSuccess }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    e.stopPropagation();
+    
     setLoading(true);
     setError('');
 
-    try {
-      const endpoint = isLogin ? '/login' : '/register';
-      const data = isLogin
-        ? { email: formData.email, password: formData.password }
-        : {
-            email: formData.email,
-            password: formData.password,
-            org_id: formData.org_id,
-            role: formData.role || 'user',
-          };
+    console.log('Login attempt with email:', formData.email);
 
-      const response = await api.post(endpoint, data);
+    try {
+      const response = await api.post('/login', {
+        email: formData.email,
+        password: formData.password,
+      });
+
+      console.log('Login response:', response);
 
       if (response.data.access_token && response.data.user) {
+        console.log('Saving token and user to localStorage');
         localStorage.setItem('token', response.data.access_token);
         localStorage.setItem('user', JSON.stringify(response.data.user));
+        console.log('Calling onLoginSuccess');
         onLoginSuccess(response.data.user);
+      } else {
+        console.error('Missing token or user in response:', response.data);
+        setError('Invalid response from server');
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'An error occurred');
+      console.error('Login error:', err);
+      console.error('Error response:', err.response);
+      setError(err.response?.data?.error || err.message || 'An error occurred');
     } finally {
       setLoading(false);
     }
@@ -55,26 +58,11 @@ export default function Login({ onLoginSuccess }) {
     <div className="login-container">
       <div className="login-box">
         <h1>Lia Assistant</h1>
-        <h2>{isLogin ? 'Sign in' : 'Sign up'}</h2>
+        <h2>Sign in</h2>
 
         {error && <div className="error-message">{error}</div>}
 
         <form onSubmit={handleSubmit}>
-          {!isLogin && (
-            <div className="form-group">
-              <label htmlFor="org_id">Organization ID</label>
-              <input
-                type="text"
-                id="org_id"
-                name="org_id"
-                value={formData.org_id}
-                onChange={handleChange}
-                required
-                placeholder="Paste your organization ID"
-              />
-            </div>
-          )}
-
           <div className="form-group">
             <label htmlFor="email">Email</label>
             <input
@@ -101,42 +89,10 @@ export default function Login({ onLoginSuccess }) {
             />
           </div>
 
-          {!isLogin && (
-            <div className="form-group">
-              <label htmlFor="role">Role</label>
-              <select
-                id="role"
-                name="role"
-                value={formData.role}
-                onChange={handleChange}
-              >
-                <option value="user">User</option>
-                <option value="admin">Admin</option>
-                <option value="owner">Owner</option>
-              </select>
-            </div>
-          )}
-
           <button type="submit" className="submit-btn" disabled={loading}>
-            {loading ? 'Loading...' : isLogin ? 'Login' : 'Register'}
+            {loading ? 'Loading...' : 'Login'}
           </button>
-        </form>
-
-        <p className="toggle-text">
-          {isLogin ? "Don't have an account? " : 'Already have an account? '}
-          <button
-            type="button"
-            className="toggle-btn"
-            onClick={() => {
-              setIsLogin(!isLogin);
-              setError('');
-            }}
-          >
-            {isLogin ? 'Register' : 'Login'}
-          </button>
-        </p>
-      </div>
+        </form>      </div>
     </div>
   );
 }
-

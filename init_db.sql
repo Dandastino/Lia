@@ -36,3 +36,11 @@ CREATE INDEX IF NOT EXISTS idx_users_org_id ON users(org_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_sync_logs_org_id ON sync_logs(org_id);
 CREATE INDEX IF NOT EXISTS idx_sync_logs_created_at ON sync_logs(created_at);
+
+INSERT INTO organizations (id, name, industry, connector_type, connector_config) VALUES 
+  ('550e8400-e29b-41d4-a716-446655440001'::UUID, 'Lia Company', 'Technology', 'salesforce', '{"api_version": "v57"}')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO users (org_id, email, password_hash, role, created_at) VALUES
+  ('550e8400-e29b-41d4-a716-446655440001'::UUID, 'admin@lia.local', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5YmMxSUmaQu7i', 'admin', CURRENT_TIMESTAMP)
+ON CONFLICT DO NOTHING;

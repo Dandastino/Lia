@@ -25,6 +25,7 @@ services:
   backend:
     image: lia_backend:latest
     container_name: lia_backend_prod
+    command: gunicorn --bind 0.0.0.0:5000 --workers 4 --timeout 120 server:app
     environment:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
@@ -38,6 +39,29 @@ services:
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
       ENV: production
       DEBUG: "False"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: always
+    networks:
+      - lia_network_prod
+
+  # Agent Service (Voice Assistant) - PRODUCTION MODE
+  agent:
+    image: lia_backend:latest
+    container_name: lia_agent_prod
+    command: python agent.py start  
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LIVEKIT_URL: ${LIVEKIT_URL}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      ENV: production
     depends_on:
       db:
         condition: service_healthy

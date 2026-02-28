@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, withAuth } from '../lib/api';
+import { api } from '../lib/api';
 import './ConnectorSettings.css';
 
 const CONNECTOR_OPTIONS = [
@@ -74,7 +74,6 @@ export default function ConnectorSettings({ user, onBack }) {
           connector_type: connectorType,
           connector_config: parsedConfig,
         },
-        withAuth(),
       );
 
       if (res.status === 200) {

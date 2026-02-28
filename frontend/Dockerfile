@@ -3,13 +3,17 @@ FROM node:18-alpine as builder
 
 WORKDIR /app
 
+# Accept build argument for API URL
+ARG VITE_API_URL=http://backend:5000
+
 COPY frontend/package*.json .
 
 RUN npm install --legacy-peer-deps
 
 COPY frontend/ .
 
-RUN npm run build
+# Build with API URL environment variable
+RUN VITE_API_URL=${VITE_API_URL} npm run build
 
 # Production stage
 FROM node:18-alpine
@@ -22,8 +26,8 @@ RUN npm install -g serve
 # Copy built app from builder
 COPY --from=builder /app/dist ./dist
 
-# Create non-root user
-RUN addgroup -g 1000 appuser && adduser -D -u 1000 -G appuser appuser
+# Create non-root user (use different UID/GID to avoid conflicts)
+RUN addgroup -g 1001 appuser && adduser -D -u 1001 -G appuser appuser
 USER appuser
 
 EXPOSE 3000

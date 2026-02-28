@@ -3,9 +3,10 @@ import './App.css';
 import Login from './components/Login';
 import VoiceInterface from './components/VoiceInterface';
 import ConnectorSettings from './components/ConnectorSettings';
+import Admin from './components/Admin';
 
 function App() {
-  const [currentView, setCurrentView] = useState('login'); // 'login' | 'voice' | 'connector'
+  const [currentView, setCurrentView] = useState('login'); // 'login' | 'voice' | 'connector' | 'admin'
   const [user, setUser] = useState(null);
 
   useEffect(() => {
@@ -14,14 +15,17 @@ function App() {
     const userData = localStorage.getItem('user');
 
     if (token && userData) {
-      setUser(JSON.parse(userData));
-      setCurrentView('voice');
+      const parsedUser = JSON.parse(userData);
+      setUser(parsedUser);
+      // Route admin users to admin dashboard, others to voice interface
+      setCurrentView(parsedUser.role === 'admin' ? 'admin' : 'voice');
     }
   }, []);
 
   const handleLoginSuccess = (userData) => {
     setUser(userData);
-    setCurrentView('voice');
+    // Route admin users to admin dashboard, others to voice interface
+    setCurrentView(userData.role === 'admin' ? 'admin' : 'voice');
   };
 
   const handleLogout = () => {
@@ -43,6 +47,10 @@ function App() {
     <div className="app">
       {currentView === 'login' && (
         <Login onLoginSuccess={handleLoginSuccess} />
+      )}
+
+      {currentView === 'admin' && user && (
+        <Admin user={user} onLogout={handleLogout} />
       )}
 
       {currentView === 'voice' && user && (

@@ -2,6 +2,7 @@
 
 Lia is a multi-tenant AI voice assistant that helps professionals efficiently manage meetings, client information, and related records through natural conversation. Each organization connects Lia to their own data system (CRM or database), so customer data stays in their infrastructure.
 
+
 ## Architecture Overview
 
 ### Multi-Tenant Design
@@ -24,77 +25,34 @@ Organization's Data System (their own database or CRM)
 
 | Connector | Type | Configuration |
 |-----------|------|---|
-| **PostgreSQL** | External Database | `{host, port, database, user, password}` |
-| **MySQL** | External Database | `{host, port, database, user, password}` |
+| **PostgreSQL** | External Database | `{host, port, db_name, user, password}` |
+| **MySQL** | External Database | `{host, port, db_name, user, password}` |
 | **HubSpot** | CRM | `{api_key}` |
-| **Salesforce** | CRM | `{instance_url, client_id, client_secret, username, password}` |
-| **Dynamics 365** | CRM | `{tenant_id, client_id, client_secret, dynamics_url}` |
+| **Salesforce** | CRM | `{client_id, client_secret, username, password}` |
+| **Dynamics 365** | CRM | `{tenant_id, client_id, client_secret` |
 
-## Project Structure
-
-```
-LIA_FOR_ALL/
-├── backend/
-│   ├── agent.py              # LiveKit voice agent entrypoint
-│   ├── server.py             # Flask API server
-│   ├── db_driver.py          # SQLAlchemy models (organizations, users, sync_logs)
-│   ├── data_manager.py       # Router for connectors
-│   ├── api_tools.py          # Generic agent tools (save_meeting, get_history)
-│   ├── prompts.py            # System prompt builder
-│   ├── requirements.txt      # Python dependencies
-│   └── drivers/
-│       ├── base.py           # Abstract driver interface
-│       ├── postgresql_driver.py
-│       ├── mysql_driver.py
-│       ├── hubspot_driver.py
-│       ├── salesforce_driver.py
-│       └── dynamics_driver.py
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── Login.jsx
-│   │   │   ├── ConnectorSettings.jsx  # Configure org connector
-│   │   │   ├── PatientDetail.jsx      # View client details
-│   │   │   └── VoiceInterface.jsx     # Voice interaction UI
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   ├── package.json
-│   └── vite.config.js
-└── README.md
-```
 
 ## Setup Guide
 
 ### Prerequisites
 
-- Python 3.10+
-- Node.js 16+
-- PostgreSQL (for Lia's internal database)
+- Docker & Docker Compose
 - LiveKit account (for voice functionality)
+- OpenAI API key (for LLM)
 
-### Backend Setup
+### Quick Start with Docker
 
-1. **Create a Python virtual environment:**
+1. **Clone and navigate to project:**
    ```bash
-   cd backend
-   python -m venv myenv
-   source myenv/bin/activate  # On Windows: myenv\Scripts\activate
+   cd LIA_FOR_ALL
    ```
 
-2. **Install dependencies:**
+2. **Set up environment variables:**
    ```bash
-   pip install -r requirements.txt
+   cp .env.docker .env
    ```
-
-3. **Configure environment variables (.env):**
+   Then edit `.env` with your credentials:
    ```bash
-   # Lia's internal database (stores organizations, users, sync logs)
-   DB_USER=your_postgres_user
-   DB_PASSWORD=your_postgres_password
-   DB_HOST=localhost
-   DB_PORT=5432
-   DB_NAME=lia_db
-   
    # JWT authentication
    JWT_SECRET_KEY=your_secret_key_change_this
    
@@ -107,141 +65,85 @@ LIA_FOR_ALL/
    OPENAI_API_KEY=your_openai_api_key
    ```
 
-4. **Initialize the database:**
+3. **Build and start all services:**
    ```bash
-   psql -U your_postgres_user -d lia_db -f init_db.sql
-   ```
-   (Create `init_db.sql` with the schema from the Quick Start section below)
-
-5. **Start the Flask API:**
-   ```bash
-   python server.py
+   make build
+   make up
    ```
 
-### Frontend Setup
-
-1. **Install dependencies:**
+4. **Verify services are running:**
    ```bash
-   cd frontend
-   npm install
+   make ps
    ```
 
-2. **Start dev server:**
-   ```bash
-   npm run dev
-   ```
+**Services will be available at:**
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:5000
+- API Docs: http://localhost:5000/api/docs
+- Database: localhost:5432
 
-3. **Build for production:**
-   ```bash
-   npm run build
-   ```
+### Manual Setup 
 
-## Quick Start
+If you prefer to run services locally without Docker:
 
-### 1. Create an Organization
-
+**Backend:**
 ```bash
-curl -X POST http://localhost:5000/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "admin@company.com",
-    "password": "password123",
-    "org_name": "Acme Corp",
-    "org_industry": "sales"
-  }'
+cd backend
+python -m venv myenv
+source myenv/bin/activate  # On Windows: .\myenv\Scripts\activate
+pip install -r requirements.txt
+python server.py
 ```
 
-Get the JWT token from response and the `org_id`.
-
-### 2. Configure a Connector
-
-Set up where the organization's data will be stored:
-
-**For PostgreSQL:**
+**Frontend:**
 ```bash
-curl -X PATCH http://localhost:5000/organizations/{org_id}/connector \
-  -H "Authorization: Bearer {jwt_token}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "connector_type": "postgresql",
-    "connector_config": {
-      "host": "client-db.example.com",
-      "port": 5432,
-      "database": "client_data",
-      "user": "lia_user",
-      "password": "secure_pass"
-    }
-  }'
+cd frontend
+npm install
+npm run dev
 ```
 
-**For HubSpot:**
-```bash
-curl -X PATCH http://localhost:5000/organizations/{org_id}/connector \
-  -H "Authorization: Bearer {jwt_token}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "connector_type": "hubspot",
-    "connector_config": {
-      "api_key": "your_hubspot_api_key"
-    }
-  }'
-```
+## How to use Lia 
 
-### 3. Create Users for the Organization
+### Admin
 
-```bash
-curl -X POST http://localhost:5000/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "user@company.com",
-    "password": "password123",
-    "org_id": "{org_id}"
-  }'
-```
+**Access the Admin Panel:**
+- Login at `http://localhost:3000` with admin account
+- Navigate to the Administration Panel tab
 
-### 4. Start Using Lia
+**Create an Organization:**
+1. Go to **Create Organization** tab
+2. Fill in:
+   - **Organization Name**: e.g., "Acme Corporation"
+   - **Industry**: e.g., "Healthcare", "Finance"
+   - **Connector Type**: Select from dropdown (PostgreSQL, MySQL, HubSpot, Salesforce, Dynamics)
+3. Fill in connector credentials (database details or API keys)
+4. Click **Create Organization**
 
-Users from the organization can now:
-- Use the web UI to login
-- Start voice consultations with Lia
-- Lia automatically saves meetings to their configured system
-- Lia retrieves meeting history from their system
+**Manage Users:**
+1. Go to **Manage Users** tab
+2. Click **Edit** to modify user details or **Delete** to remove
+3. Or go to **Create User** tab to add new users
 
-## Database Schema (Lia's Internal DB)
+**Edit Organization:**
+1. Go to **Organizations** tab
+2. Click **Edit** to modify connector configuration
+3. Click **Save Organization**
 
-```sql
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+### User
 
--- Organizations: Connector configuration
-CREATE TABLE organizations (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name VARCHAR(255) NOT NULL,
-    industry VARCHAR(100),
-    connector_type VARCHAR(50) NOT NULL,
-    connector_config JSONB,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
+**Login and Access:**
+- Go to `http://localhost:3000`
+- Login with your email and password
 
--- Users: Authentication
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    org_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    role VARCHAR(50) DEFAULT 'user',
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
+**Use Voice Interface:**
+- Speak naturally to Lia about meetings, clients, or information you need
 
--- Sync Logs: Audit trail
-CREATE TABLE sync_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    org_id UUID REFERENCES organizations(id),
-    status VARCHAR(50),
-    target_system VARCHAR(50),
-    error_message TEXT,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-```
+**What Lia Can Do:**
+- Save meeting summaries to your organization's system
+- Retrieve meeting history and client information
+- Update records in your connected CRM or database
+- Provide context from your existing data
+
 
 ## How Data Flows
 
@@ -267,83 +169,3 @@ CREATE TABLE sync_logs (
 3. Driver queries organization's system
 4. Results returned to Lia for context
 ```
-
-## Environment Variables Explained
-
-| Variable | Purpose |
-|----------|---------|
-| `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME` | Lia's internal Postgres database |
-| `JWT_SECRET_KEY` | Sign authentication tokens |
-| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Voice meeting infrastructure |
-| `OPENAI_API_KEY` | LLM for Lia's intelligence |
-
-## API Endpoints
-
-### Authentication
-- `POST /register` - Create a new user/organization
-- `POST /login` - Login user
-
-### Organizations
-- `PATCH /organizations/{org_id}/connector` - Configure connector for organization
-
-## Development
-
-### Adding a New Connector
-
-1. Create `drivers/your_connector_driver.py`:
-   ```python
-   from .base import BaseDriver
-   
-   class YourConnectorDriver(BaseDriver):
-       def __init__(self, connector_config):
-           super().__init__(connector_config)
-           # Initialize connection
-       
-       def save_meeting(self, user_id, payload):
-           # Implement save logic
-           return result
-       
-       def get_meeting_history(self, user_id, filters=None):
-           # Implement retrieval logic
-           return meetings
-   ```
-
-2. Update `data_manager.py`:
-   ```python
-   from drivers.your_connector_driver import YourConnectorDriver
-   
-   # In from_user_id():
-   elif connector_type == "your_connector":
-       driver = YourConnectorDriver(config)
-   ```
-
-3. Add dependencies to `requirements.txt` if needed
-
-## Troubleshooting
-
-### "Connector failed to connect"
-- Verify credentials in `connector_config`
-- Check database/API access from server
-
-### "User not found"
-- Ensure user is created under the correct organization
-- Check `org_id` is set correctly
-
-### "Meeting not saved"
-- Check `sync_logs` table for error details
-- Verify connector credentials
-
-## Contributing
-
-1. Create a feature branch
-2. Make changes
-3. Test with your organization's connector
-4. Submit PR
-
-## License
-
-MIT
-
-## Support
-
-For issues or questions, please open a GitHub issue.

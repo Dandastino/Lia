@@ -7,7 +7,7 @@ import {
   BarVisualizer 
 } from "@livekit/components-react";
 import "@livekit/components-styles";
-import { api, withAuth } from "../lib/api";
+import { api } from "../lib/api";
 import "./VoiceInterface.css";
 
 // Voice Assistant Controls Component (must be inside LiveKitRoom)
@@ -86,7 +86,6 @@ const VoiceInterface = ({ user, onLogout, onOpenConnectorSettings }) => {
       
       const response = await api.get('/getToken', {
         params,
-        ...withAuth(),
       });
 
       console.log('Token response:', response.data);

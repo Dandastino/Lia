@@ -6,6 +6,7 @@ from .livekit import livekit_bp
 from .meetings import meetings_bp
 from .organizations import organizations_bp
 from .root import root_bp
+from .admin import admin_bp
 
 
 def register_blueprints(app: Flask) -> None:
@@ -15,3 +16,4 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(organizations_bp)
     app.register_blueprint(meetings_bp)
     app.register_blueprint(livekit_bp)
+    app.register_blueprint(admin_bp)
