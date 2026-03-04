@@ -42,5 +42,6 @@ INSERT INTO organizations (id, name, industry, connector_type, connector_config)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO users (org_id, email, password_hash, role, created_at) VALUES
-  ('550e8400-e29b-41d4-a716-446655440001'::UUID, 'admin@lia.local', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5YmMxSUmaQu7i', 'admin', CURRENT_TIMESTAMP)
+  ('550e8400-e29b-41d4-a716-446655440001'::UUID, 'admin@lia.no', '$2b$12$2Pxac7KeyY1N92zKml228.MHBvA6Vg/TiHMS8wMuDFbHLB1IV8K7q', 'admin', CURRENT_TIMESTAMP)
 ON CONFLICT DO NOTHING;
+-- username: admin@lia.no - password : 4Dm1nL1A

@@ -1,5 +1,18 @@
 # Lia - Your AI Assistant
 
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask&logoColor=white)
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
+![Vite](https://img.shields.io/badge/Build-Vite-646CFF?logo=vite&logoColor=white)
+![LiveKit](https://img.shields.io/badge/Voice-LiveKit-07C160?logo=livekit&logoColor=white)
+![OpenAI](https://img.shields.io/badge/LLM-OpenAI-412991?logo=openai&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-4169E1?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Container-Docker-2496ED?logo=docker&logoColor=white)
+![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-010101?logo=socket.io&logoColor=white)
+![REST API](https://img.shields.io/badge/API-REST-009688?logo=api&logoColor=white)
+![JWT](https://img.shields.io/badge/Auth-JWT-000000?logo=jsonwebtokens&logoColor=white)
+![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)
+
 Lia is a multi-tenant AI voice assistant that helps professionals efficiently manage meetings, client information, and related records through natural conversation. Each organization connects Lia to their own data system (CRM or database), so customer data stays in their infrastructure.
 
 

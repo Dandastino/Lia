@@ -5,9 +5,9 @@ React + Vite frontend for Lia AI Assistant. Provides user authentication, connec
 ## Components
 
 - **Login.jsx** - User authentication
-- **ConnectorSettings.jsx** - Configure organization's data connector (PostgreSQL, MySQL, HubSpot, etc.)
 - **VoiceInterface.jsx** - Real-time voice conversation with Lia
-- **PatientDetail.jsx** - View/manage client details (industry-specific)
+- **ConnectorSettings.jsx** - Configure organization's data connector (PostgreSQL, MySQL, HubSpot, etc.)
+- **Admin.jsx** - Multi-tenant administration panel for managing organizations and users
 
 ## Setup
 

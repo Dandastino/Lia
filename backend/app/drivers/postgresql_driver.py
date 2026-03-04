@@ -3,15 +3,78 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 from contextlib import contextmanager
-from sqlalchemy import create_engine, Column, String, Text, DateTime
+import logging
+from sqlalchemy import create_engine, Column, String, Text, DateTime, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
 from sqlalchemy.dialects.postgresql import UUID as JSONB
 import uuid
 
 from .base import BaseDriver
+from ..schema.inspector import SchemaInspector
+from ..schema.query_builder import DynamicQueryBuilder
+
+logger = logging.getLogger("postgresql_driver")
 
 Base = declarative_base()
+
+
+class PostgreSQLSchemaInspector(SchemaInspector):
+    """PostgreSQL-specific schema introspection using SQLAlchemy."""
+
+    def __init__(self, engine):
+        self.engine = engine
+
+    async def introspect_tables(self) -> List[Dict[str, Any]]:
+        """Introspect all tables in the database."""
+        inspector = inspect(self.engine)
+        tables = []
+        
+        for table_name in inspector.get_table_names():
+            columns = inspector.get_columns(table_name)
+            column_names = [col["name"] for col in columns]
+            column_types = {col["name"]: str(col["type"]) for col in columns}
+            
+            tables.append({
+                "name": table_name,
+                "columns": column_names,
+                "column_types": column_types,
+            })
+        
+        return tables
+
+    async def introspect_table(self, table_name: str) -> Dict[str, Any]:
+        """Introspect a specific table."""
+        inspector = inspect(self.engine)
+        columns = inspector.get_columns(table_name)
+        pk = inspector.get_pk_constraint(table_name)
+        indexes = inspector.get_indexes(table_name)
+        fks = inspector.get_foreign_keys(table_name)
+        
+        return {
+            "name": table_name,
+            "columns": [
+                {
+                    "name": col["name"],
+                    "type": str(col["type"]),
+                    "nullable": col.get("nullable", True),
+                    "default": col.get("default"),
+                }
+                for col in columns
+            ],
+            "primary_keys": pk.get("constrained_columns", []) if pk else [],
+            "indexes": indexes,
+            "foreign_keys": fks,
+        }
+
+    async def infer_id_column(self, table_name: str) -> Optional[str]:
+        """Infer the primary key column."""
+        inspector = inspect(self.engine)
+        pk = inspector.get_pk_constraint(table_name)
+        if pk and pk.get("constrained_columns"):
+            return pk["constrained_columns"][0]
+        return None
+
 
 
 class ExternalMeeting(Base):
@@ -50,6 +113,9 @@ class PostgreSQLDriver(BaseDriver):
         # Build connection URI
         db_uri = f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
         
+        # SSL configuration - try to use SSL but allow fallback if not available
+        ssl_mode = self.config.get("sslmode", "prefer")  # prefer, require, or disable
+        
         # Create engine with connection pooling optimized for concurrent users
         self.engine = create_engine(
             db_uri,
@@ -58,12 +124,15 @@ class PostgreSQLDriver(BaseDriver):
             max_overflow=10,           # Allow up to 10 additional temporary connections
             pool_pre_ping=True,        # Verify connections are alive before using
             pool_recycle=3600,         # Recycle connections every hour to avoid stale connections
-            echo=False
+            echo=False,
+            connect_args={"sslmode": ssl_mode}  # Enable SSL encryption
         )
         self.SessionLocal = sessionmaker(bind=self.engine)
 
-        # Create tables if they don't exist
-        Base.metadata.create_all(self.engine)
+        # NOTE: Lia connects to EXISTING external databases.
+        # We do NOT create tables in the client's database.
+        # Schema discovery happens via introspection only (read-only).
+        # For legacy meeting support, ensure 'lia_meetings' table exists manually in client DB.
 
     @contextmanager
     def get_session(self):
@@ -144,3 +213,126 @@ class PostgreSQLDriver(BaseDriver):
                 ]
         except Exception as e:
             raise Exception(f"Failed to retrieve meeting history from external PostgreSQL: {str(e)}")
+
+    # ===== Generic CRUD methods (multi-entity support) =====
+
+    async def get_schema_info(self) -> Dict[str, Any]:
+        """Return raw database schema for LLM semantic analysis."""
+        try:
+            inspector = PostgreSQLSchemaInspector(self.engine)
+            tables = await inspector.introspect_tables()
+            logger.info(f"Introspected {len(tables)} tables from PostgreSQL")
+            return {"tables": tables}
+        except Exception as e:
+            logger.error(f"Failed to introspect PostgreSQL schema: {e}")
+            raise
+
+    async def create_entity(
+        self,
+        entity_type: str,
+        user_id: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Create an entity using dynamic query builder based on schema mapping."""
+        try:
+            # Get mapping from config
+            mapping = self.config.get("schema_mappings", {}).get(entity_type)
+            if not mapping:
+                raise ValueError(f"No schema mapping for entity type: {entity_type}")
+            
+            builder = DynamicQueryBuilder(mapping)
+            sql, params = builder.build_insert(payload)
+            
+            with self.get_session() as session:
+                result = session.execute(text(sql), params)
+                row = result.fetchone()
+                
+                if not row:
+                    raise Exception(f"Failed to insert {entity_type}")
+                
+                row_dict = dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(result.keys(), row))
+                return builder.normalize_row(row_dict)
+        except Exception as e:
+            logger.error(f"Failed to create {entity_type}: {e}")
+            raise
+
+    async def read_entities(
+        self,
+        entity_type: str,
+        user_id: Optional[str] = None,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Read entities using dynamic queries based on schema mapping."""
+        try:
+            mapping = self.config.get("schema_mappings", {}).get(entity_type)
+            if not mapping:
+                raise ValueError(f"No schema mapping for entity type: {entity_type}")
+            
+            builder = DynamicQueryBuilder(mapping)
+            
+            # Add user_id filter if provided
+            if user_id and "user_id" in builder.column_mapping:
+                if not filters:
+                    filters = {}
+                filters["user_id"] = user_id
+            
+            sql, params = builder.build_select(filters=filters, limit=filters.get("limit", 20) if filters else 20)
+            
+            with self.get_session() as session:
+                results = session.execute(text(sql), params).fetchall()
+                rows = [dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(session.execute(text(sql), params).keys(), row)) for row in results]
+                return builder.normalize_rows(rows)
+        except Exception as e:
+            logger.error(f"Failed to read {entity_type}: {e}")
+            raise
+
+    async def update_entity(
+        self,
+        entity_type: str,
+        entity_id: str,
+        updates: Dict[str, Any],
+        user_id: str,
+    ) -> Dict[str, Any]:
+        """Update an entity using dynamic queries."""
+        try:
+            mapping = self.config.get("schema_mappings", {}).get(entity_type)
+            if not mapping:
+                raise ValueError(f"No schema mapping for entity type: {entity_type}")
+            
+            builder = DynamicQueryBuilder(mapping)
+            sql, params = builder.build_update(entity_id, updates)
+            
+            with self.get_session() as session:
+                result = session.execute(text(sql), params)
+                row = result.fetchone()
+                
+                if not row:
+                    raise ValueError(f"{entity_type} not found: {entity_id}")
+                
+                row_dict = dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(result.keys(), row))
+                return builder.normalize_row(row_dict)
+        except Exception as e:
+            logger.error(f"Failed to update {entity_type}: {e}")
+            raise
+
+    async def delete_entity(
+        self,
+        entity_type: str,
+        entity_id: str,
+        user_id: str,
+    ) -> bool:
+        """Delete an entity using dynamic queries."""
+        try:
+            mapping = self.config.get("schema_mappings", {}).get(entity_type)
+            if not mapping:
+                raise ValueError(f"No schema mapping for entity type: {entity_type}")
+            
+            builder = DynamicQueryBuilder(mapping)
+            sql, params = builder.build_delete(entity_id)
+            
+            with self.get_session() as session:
+                result = session.execute(text(sql), params)
+                return result.rowcount > 0
+        except Exception as e:
+            logger.error(f"Failed to delete {entity_type}: {e}")
+            raise

@@ -1,10 +1,11 @@
 from __future__ import annotations
+import json
+from uuid import UUID
 from livekit.agents import (
     AutoSubscribe,
     JobContext,
     WorkerOptions,
     cli,
-    llm,
 )
 from livekit.agents.voice import Agent, AgentSession
 from livekit.plugins import openai
@@ -16,7 +17,6 @@ from app.extensions import db
 from app.models import User
 from app.tools.middleware import MiddlewareTools
 from app.prompts import build_system_prompt
-import os
 import logging
 
 load_dotenv()
@@ -37,19 +37,58 @@ def init_database():
     return app
 
 
+def normalize_user_id(raw_user_id: str | None) -> str | None:
+    if not raw_user_id:
+        return None
+
+    candidate = raw_user_id
+    if raw_user_id.startswith("User_"):
+        candidate = raw_user_id.split("User_", 1)[1]
+
+    try:
+        return str(UUID(candidate))
+    except ValueError:
+        return None
+
+
 async def entrypoint(ctx: JobContext):
     """Main entry point for the multi-tenant Lia agent."""
     app = init_database()
     # Ensure all DB operations in this job run within the Flask app context
     with app.app_context():
         await ctx.connect(auto_subscribe=AutoSubscribe.SUBSCRIBE_ALL)
-        await ctx.wait_for_participant()
+        try:
+            participant = await ctx.wait_for_participant()
+        except RuntimeError as exc:
+            if "room disconnected while waiting for participant" in str(exc).lower():
+                logger.info("Room disconnected before participant joined; closing job gracefully")
+                return
+            raise
 
-        # Derive user_id from job metadata or participant identity.
-        metadata = ctx.job.metadata or {}
-        user_id = metadata.get("user_id")
+        # Derive user_id from job metadata, participant metadata, or participant identity.
+        job_metadata = ctx.job.metadata or {}
+        if isinstance(job_metadata, str):
+            try:
+                job_metadata = json.loads(job_metadata)
+            except Exception:
+                job_metadata = {}
 
-        logger.info(f"Starting consultation session for user_id: {user_id}")
+        participant_metadata = getattr(participant, "metadata", None) or {}
+        if isinstance(participant_metadata, str):
+            try:
+                participant_metadata = json.loads(participant_metadata)
+            except Exception:
+                participant_metadata = {}
+
+        participant_identity = getattr(participant, "identity", None)
+        raw_user_id = (
+            job_metadata.get("user_id")
+            or participant_metadata.get("user_id")
+            or participant_identity
+        )
+        user_id = normalize_user_id(raw_user_id)
+
+        logger.info(f"Starting voice session for raw_user_id={raw_user_id}, normalized_user_id={user_id}")
 
         # Resolve user + organization for multi-tenant configuration
         user = User.query.get(user_id) if user_id else None
@@ -70,14 +109,20 @@ async def entrypoint(ctx: JobContext):
         model = openai.realtime.RealtimeModel(
             voice="marin",
             temperature=0.8,
-            modalities=["audio", "text"]
+            modalities=["audio", "text"],
+            turn_detection={
+                "type": "server_vad",
+                "threshold": 0.8, # Valid range is <= 1.0; higher means less sensitivity to background noise
+                "prefix_padding_ms": 500, # Capture 500ms of audio before speech starts
+                "silence_duration_ms": 1500, # Consider speech ended after 1.5s of silence
+            },
         )
 
         # Industry-agnostic tools: generic meeting + history only
         middleware_tools = MiddlewareTools(user_id)
         tools = middleware_tools.get_tools()
 
-        # Create agent with dynamic, industry-aware instructions and tools
+        # Create agent with dynamic, industry-aware instructions, tools, and STT
         agent = Agent(
             instructions=instructions,
             llm=model,

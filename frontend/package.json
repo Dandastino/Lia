@@ -1,5 +1,5 @@
 {
-  "name": "lia-medical-frontend",
+  "name": "lia-frontend",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -16,7 +16,11 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "axios": "^1.6.0",
-    "react-router-dom": "^6.20.0"
+    "react-router-dom": "^6.20.0",
+    "three": "^0.160.0",
+    "@react-three/fiber": "^8.15.0",
+    "@react-three/drei": "^9.95.0",
+    "@readyplayerme/visage": "^2.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

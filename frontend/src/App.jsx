@@ -18,14 +18,14 @@ function App() {
       const parsedUser = JSON.parse(userData);
       setUser(parsedUser);
       // Route admin users to admin dashboard, others to voice interface
-      setCurrentView(parsedUser.role === 'admin' ? 'admin' : 'voice');
+      setCurrentView(parsedUser.role === 'admin' || parsedUser.role === 'owner' ? 'admin' : 'voice');
     }
   }, []);
 
   const handleLoginSuccess = (userData) => {
     setUser(userData);
     // Route admin users to admin dashboard, others to voice interface
-    setCurrentView(userData.role === 'admin' ? 'admin' : 'voice');
+    setCurrentView(userData.role === 'admin' || userData.role === 'owner' ? 'admin' : 'voice');
   };
 
   const handleLogout = () => {

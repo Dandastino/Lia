@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import create_access_token
+from sqlalchemy.exc import SQLAlchemyError
 
 from ..models import DatabaseDriver
 
@@ -19,13 +20,19 @@ def login():
     try:
         data = request.get_json() or {}
 
-        if not data or not all(k in data for k in ["email", "password"]):
+        email = (data.get("email") or "").strip().lower()
+        password = data.get("password") or ""
+
+        if not email or not password:
             return jsonify({"error": "Missing email or password"}), 400
 
-        user = db_driver.get_user_by_email(data["email"])
+        user = db_driver.get_user_by_email(email)
 
-        if not user or not user.check_password(data["password"]):
-            return jsonify({"error": "Invalid email or password"}), 401
+        if not user:
+            return jsonify({"error": "Email does not exist"}), 401
+
+        if not user.check_password(password):
+            return jsonify({"error": "Invalid password"}), 401
 
         access_token = create_access_token(identity=str(user.id))
 
@@ -42,5 +49,7 @@ def login():
             }
         ), 200
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except SQLAlchemyError:
+        return jsonify({"error": "Database error while logging in"}), 500
+    except Exception:
+        return jsonify({"error": "Server error while logging in"}), 500
