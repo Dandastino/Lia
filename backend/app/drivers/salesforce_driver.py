@@ -58,7 +58,7 @@ class SalesforceDriver(BaseDriver):
             "Content-Type": "application/json",
         }
 
-    def save_meeting(self, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def save_meeting(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         headers = self._get_headers()
         task_data = {
             "Subject": payload.get("title", "Meeting"),
@@ -88,7 +88,7 @@ class SalesforceDriver(BaseDriver):
         except requests.exceptions.RequestException as e:
             raise Exception(f"Failed to save meeting to Salesforce: {str(e)}")
 
-    def get_meeting_history(self, user_id: str, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def get_meeting_history(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         headers = self._get_headers()
 
         try:
@@ -153,7 +153,7 @@ class SalesforceDriver(BaseDriver):
             logger.error(f"Failed to introspect Salesforce schema: {e}")
             raise
 
-    async def create_entity(self, entity_type: str, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_entity(self, entity_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         try:
             mapping = self.config.get("schema_mappings", {}).get(entity_type)
             if not mapping:
@@ -186,7 +186,7 @@ class SalesforceDriver(BaseDriver):
             logger.error(f"Failed to create {entity_type}: {e}")
             raise
 
-    async def read_entities(self, entity_type: str, user_id: Optional[str] = None, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    async def read_entities(self, entity_type: str, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         try:
             mapping = self.config.get("schema_mappings", {}).get(entity_type)
             if not mapping:
@@ -221,7 +221,7 @@ class SalesforceDriver(BaseDriver):
             logger.error(f"Failed to read {entity_type}: {e}")
             raise
 
-    async def update_entity(self, entity_type: str, entity_id: str, updates: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    async def update_entity(self, entity_type: str, entity_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         try:
             mapping = self.config.get("schema_mappings", {}).get(entity_type)
             if not mapping:
@@ -253,7 +253,7 @@ class SalesforceDriver(BaseDriver):
             logger.error(f"Failed to update {entity_type}: {e}")
             raise
 
-    async def delete_entity(self, entity_type: str, entity_id: str, user_id: str) -> bool:
+    async def delete_entity(self, entity_type: str, entity_id: str) -> bool:
         try:
             mapping = self.config.get("schema_mappings", {}).get(entity_type)
             if not mapping:

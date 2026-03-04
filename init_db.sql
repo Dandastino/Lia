@@ -31,11 +31,40 @@ CREATE TABLE IF NOT EXISTS sync_logs (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
+-- User entity ownership (tracks which entities each user owns)
+CREATE TABLE IF NOT EXISTS user_entity_ownership (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    entity_type VARCHAR(100) NOT NULL,
+    external_entity_id VARCHAR(500) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, entity_type, external_entity_id)
+);
+
+-- External user mapping (maps LIA user UUIDs to external CRM user IDs)
+CREATE TABLE IF NOT EXISTS external_user_mapping (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    crm_type VARCHAR(50) NOT NULL,
+    external_user_id VARCHAR(500) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, crm_type)
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_users_org_id ON users(org_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_sync_logs_org_id ON sync_logs(org_id);
 CREATE INDEX IF NOT EXISTS idx_sync_logs_created_at ON sync_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_user_entity_ownership_user_id ON user_entity_ownership(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_entity_ownership_org_id ON user_entity_ownership(org_id);
+CREATE INDEX IF NOT EXISTS idx_user_entity_lookup ON user_entity_ownership(org_id, entity_type, external_entity_id);
+CREATE INDEX IF NOT EXISTS idx_external_user_mapping_user_id ON external_user_mapping(user_id);
+CREATE INDEX IF NOT EXISTS idx_external_user_mapping_org_id ON external_user_mapping(org_id);
+CREATE INDEX IF NOT EXISTS idx_external_user_lookup ON external_user_mapping(org_id, crm_type, external_user_id);
 
 INSERT INTO organizations (id, name, industry, connector_type, connector_config) VALUES 
   ('550e8400-e29b-41d4-a716-446655440001'::UUID, 'Lia Company', 'Technology', 'salesforce', '{"api_version": "v57"}')

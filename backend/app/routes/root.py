@@ -9,7 +9,7 @@ def index():
         {
             "name": "Lia Assistant API",
             "version": "1.0.0",
-            "description": "Multi-tenant backend API for Lia",
+            "description": "Multi-tenant backend API for Lia with data isolation",
             "note": "User and organization management is available via Admin UI or CLI (python manage.py)",
             "endpoints": {
                 "auth": {
@@ -27,6 +27,12 @@ def index():
                     "update_user": "PUT /admin/users/<id> (admin only)",
                     "delete_user": "DELETE /admin/users/<id> (admin only)",
                     "delete_org": "DELETE /admin/organizations/<id> (admin only)",
+                    "entity_ownership": {
+                        "list": "GET /admin/users/<id>/entity-ownership (admin only, returns entities owned by user)",
+                        "assign": "POST /admin/users/<id>/entity-ownership (admin only, assign entity to user)",
+                        "remove": "DELETE /admin/users/<id>/entity-ownership/<entity_type>/<entity_id> (admin only)",
+                        "bulk_assign": "POST /admin/entity-ownership/bulk (admin only, bulk assign entities)",
+                    },
                 },
                 "health": "GET /health",
             },

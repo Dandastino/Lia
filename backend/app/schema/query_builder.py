@@ -73,7 +73,12 @@ class DynamicQueryBuilder:
         """Build SELECT SQL with optional filtering.
         
         Args:
-            filters: {"user_id": "123", "created_at_gte": "2024-01-01", ...}
+            filters: {
+                "user_id": "123", 
+                "created_at_gte": "2024-01-01",
+                "owned_entity_ids": ["id1", "id2", "id3"],  # IN clause for data isolation
+                ...
+            }
             limit: Max rows to return
             
         Returns:
@@ -84,18 +89,41 @@ class DynamicQueryBuilder:
         
         if filters:
             for filter_key, filter_value in filters.items():
+                # Special handling for ownership filter (data isolation)
+                if filter_key == "owned_entity_ids":
+                    if isinstance(filter_value, list) and filter_value:
+                        # Build IN clause: id IN ('id1', 'id2', 'id3')
+                        placeholders = ", ".join([f":{self.id_column}_{i}" for i in range(len(filter_value))])
+                        where_clauses.append(f"{self.id_column} IN ({placeholders})")
+                        # Add each ID as a separate parameter
+                        for idx, entity_id in enumerate(filter_value):
+                            params[f"{self.id_column}_{idx}"] = entity_id
+                    logger.debug(f"Added ownership filter for {len(filter_value) if isinstance(filter_value, list) else 0} entity IDs")
+                    continue
+                
                 # Map filter key to DB column
                 db_column = self.column_mapping.get(filter_key, filter_key)
+                
+                # Skip filters where column is None or not mapped
+                if db_column is None:
+                    logger.debug(f"Skipping filter {filter_key}: no mapped column")
+                    continue
                 
                 # Handle range queries
                 if filter_key.endswith("_gte"):
                     base_key = filter_key[:-4]
                     db_column = self.column_mapping.get(base_key, base_key)
+                    if db_column is None:
+                        logger.debug(f"Skipping range filter {filter_key}: no mapped column")
+                        continue
                     where_clauses.append(f"{db_column} >= :{filter_key}")
                     params[filter_key] = filter_value
                 elif filter_key.endswith("_lte"):
                     base_key = filter_key[:-4]
                     db_column = self.column_mapping.get(base_key, base_key)
+                    if db_column is None:
+                        logger.debug(f"Skipping range filter {filter_key}: no mapped column")
+                        continue
                     where_clauses.append(f"{db_column} <= :{filter_key}")
                     params[filter_key] = filter_value
                 else:

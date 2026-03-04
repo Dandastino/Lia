@@ -38,7 +38,6 @@ class HubSpotDriver(BaseDriver):
         headers = self._get_headers()
         hubspot_data = {
             "body": payload.get("summary", ""),
-            "ownerId": user_id,
         }
 
         try:

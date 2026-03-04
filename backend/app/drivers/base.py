@@ -43,14 +43,12 @@ class BaseDriver(ABC):
     async def create_entity(
         self,
         entity_type: str,
-        user_id: str,
         payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Create a new record in an existing entity type in the external system.
         
         Args:
             entity_type: The entity type to add a record to (\"meeting\", \"patient\", \"contact\", etc.)
-            user_id: Creator/owner user ID
             payload: Normalized record data {title, summary, user_id, ...}
             
         Returns:
@@ -69,7 +67,7 @@ class BaseDriver(ABC):
         
         Args:
             entity_type: The entity type to query ("meeting", "patient", "contact", etc.)
-            user_id: Optionally filter by creator/owner
+            user_id: Optionally filter by creator/owner (used by SQL drivers)
             filters: {user_id, created_at_gte, limit, ...}
             
         Returns:
@@ -83,15 +81,13 @@ class BaseDriver(ABC):
         entity_type: str,
         entity_id: str,
         updates: Dict[str, Any],
-        user_id: str,
     ) -> Dict[str, Any]:
         """Update an existing record in an entity type in the external system.
         
         Args:
-            entity_type: The entity type containing the record ("meeting", "patient", etc.)
+            entity_type: The entity type containing the record (\"meeting\", \"patient\", etc.)
             entity_id: ID of the specific record to update
             updates: Normalized fields to update {title, summary, ...}
-            user_id: User performing the update
             
         Returns:
             Updated record
@@ -103,14 +99,12 @@ class BaseDriver(ABC):
         self,
         entity_type: str,
         entity_id: str,
-        user_id: str,
     ) -> bool:
         """Delete a specific record from an entity type in the external system.
         
         Args:
-            entity_type: The entity type containing the record ("meeting", "patient", etc.)
+            entity_type: The entity type containing the record (\"meeting\", \"patient\", etc.)
             entity_id: ID of the specific record to delete
-            user_id: User performing the delete
             
         Returns:
             True if deleted, False if not found

@@ -201,7 +201,7 @@ class MySQLDriver(BaseDriver):
             logger.error(f"Failed to introspect MySQL schema: {e}")
             raise
 
-    async def create_entity(self, entity_type: str, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_entity(self, entity_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         try:
             mapping = self.config.get("schema_mappings", {}).get(entity_type)
             if not mapping:
@@ -246,7 +246,7 @@ class MySQLDriver(BaseDriver):
             logger.error(f"Failed to read {entity_type}: {e}")
             raise
 
-    async def update_entity(self, entity_type: str, entity_id: str, updates: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    async def update_entity(self, entity_type: str, entity_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         try:
             mapping = self.config.get("schema_mappings", {}).get(entity_type)
             if not mapping:
@@ -268,7 +268,7 @@ class MySQLDriver(BaseDriver):
             logger.error(f"Failed to update {entity_type}: {e}")
             raise
 
-    async def delete_entity(self, entity_type: str, entity_id: str, user_id: str) -> bool:
+    async def delete_entity(self, entity_type: str, entity_id: str) -> bool:
         try:
             mapping = self.config.get("schema_mappings", {}).get(entity_type)
             if not mapping:

@@ -112,6 +112,8 @@ class MiddlewareTools:
     ) -> Dict[str, Any]:
         """Create a new record in an existing entity type.
         
+        Uses AI-validated schema to ensure table existence before querying.
+        
         Args:
             entity_type: The entity type to add a record to ("meeting", "patient", "contact", "deal", etc.)
             title: Record title/name
@@ -120,7 +122,7 @@ class MiddlewareTools:
             metadata: Custom metadata
             
         Returns:
-            Created record with ID and timestamps
+            Created record with ID and timestamps, or error dict if failed
         """
         if not self._has_user_context():
             return {"error": "Missing user context; cannot create record."}
@@ -134,12 +136,16 @@ class MiddlewareTools:
                 "metadata": metadata or {},
             }
             
-            result = await dm.create_entity(entity_type, self.user_id, payload)
+            result = await dm.create_entity(entity_type, payload)
             logger.info(f"Created record in {entity_type}: {result.get('id')}")
             return result
+        except ValueError as e:
+            # Handle authorization issues, missing tables, etc.
+            logger.warning(f"Cannot create record in {entity_type}: {e}")
+            return {"error": f"Cannot create record: {str(e)}"}
         except Exception as e:
-            logger.error(f"Failed to create record in {entity_type}: {e}")
-            raise
+            logger.error(f"Failed to create record in {entity_type}: {e}", exc_info=True)
+            return {"error": f"Failed to create record: {str(e)}"}
 
     async def _get_entities(
         self,
@@ -149,13 +155,16 @@ class MiddlewareTools:
     ) -> List[Dict[str, Any]]:
         """Retrieve records from a specific entity type.
         
+        Uses AI-validated schema to ensure table existence before querying.
+        Gracefully handles missing tables or user ownership records (multitenant safety).
+        
         Args:
             entity_type: Which entity type to query ("meeting", "patient", "contact", "deal", etc.)
             limit: Max number of records to return (1-50)
             user_only: Filter to only current user's records
             
         Returns:
-            List of records in normalized format
+            List of records in normalized format (empty list if none found or table missing)
         """
         if not self._has_user_context():
             logger.warning(f"Missing user context; returning empty records for {entity_type}")
@@ -172,9 +181,15 @@ class MiddlewareTools:
             result = await dm.read_entities(entity_type, user_id, query_filters)
             logger.info(f"Retrieved {len(result)} records from {entity_type}")
             return result
+        except ValueError as e:
+            # Handle missing tables, authorization issues, etc.
+            logger.warning(f"Cannot retrieve {entity_type} records: {e}")
+            # Return empty list instead of crashing - graceful degradation for multitenant safety
+            return []
         except Exception as e:
-            logger.error(f"Failed to get records from {entity_type}: {e}")
-            raise
+            logger.error(f"Failed to get records from {entity_type}: {e}", exc_info=True)
+            # Return empty list instead of crashing - graceful degradation for multitenant safety
+            return []
 
     async def _update_entity(
         self,
@@ -186,6 +201,8 @@ class MiddlewareTools:
     ) -> Dict[str, Any]:
         """Update an existing record in an entity.
         
+        Uses AI-validated schema to ensure table existence before querying.
+        
         Args:
             entity_type: Which entity type the record belongs to ("meeting", "patient", "contact", etc.)
             entity_id: ID of the specific record to update
@@ -194,7 +211,7 @@ class MiddlewareTools:
             metadata: New metadata (if updating)
             
         Returns:
-            Updated record
+            Updated record, or error dict if failed
         """
         if not self._has_user_context():
             return {"error": "Missing user context; cannot update record."}
@@ -210,12 +227,16 @@ class MiddlewareTools:
             if metadata is not None:
                 update_payload["metadata"] = metadata
             
-            result = await dm.update_entity(entity_type, entity_id, update_payload, self.user_id)
+            result = await dm.update_entity(entity_type, entity_id, update_payload)
             logger.info(f"Updated record {entity_id} in {entity_type}")
             return result
+        except ValueError as e:
+            # Handle authorization issues, missing tables, etc.
+            logger.warning(f"Cannot update record in {entity_type}: {e}")
+            return {"error": f"Cannot update record: {str(e)}"}
         except Exception as e:
-            logger.error(f"Failed to update record {entity_id} in {entity_type}: {e}")
-            raise
+            logger.error(f"Failed to update record {entity_id} in {entity_type}: {e}", exc_info=True)
+            return {"error": f"Failed to update record: {str(e)}"}
 
     async def _delete_entity(
         self,
@@ -224,21 +245,27 @@ class MiddlewareTools:
     ) -> Dict[str, Any]:
         """Delete a specific record from an entity.
         
+        Uses AI-validated schema to ensure table existence before querying.
+        
         Args:
             entity_type: Which entity type the record belongs to ("meeting", "patient", "contact", etc.)
             entity_id: ID of the specific record to delete
             
         Returns:
-            {"deleted": True/False}
+            {"deleted": True/False} or error dict if failed
         """
         if not self._has_user_context():
             return {"deleted": False, "error": "Missing user context; cannot delete record."}
 
         try:
             dm = DataManager.from_user_id(self.user_id)
-            deleted = await dm.delete_entity(entity_type, entity_id, self.user_id)
+            deleted = await dm.delete_entity(entity_type, entity_id)
             logger.info(f"Deleted record {entity_id} from {entity_type}: {deleted}")
             return {"deleted": deleted}
+        except ValueError as e:
+            # Handle authorization issues, missing tables, etc.
+            logger.warning(f"Cannot delete record in {entity_type}: {e}")
+            return {"deleted": False, "error": f"Cannot delete record: {str(e)}"}
         except Exception as e:
-            logger.error(f"Failed to delete record {entity_id} from {entity_type}: {e}")
-            raise
+            logger.error(f"Failed to delete record {entity_id} from {entity_type}: {e}", exc_info=True)
+            return {"deleted": False, "error": f"Failed to delete record: {str(e)}"}

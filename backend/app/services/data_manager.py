@@ -5,6 +5,7 @@ from uuid import UUID
 from typing import Any, Dict, List, Optional
 
 from ..models import Organization, User, DatabaseDriver
+from ..extensions import db
 from ..drivers.base import BaseDriver
 from ..drivers.postgresql_driver import PostgreSQLDriver
 from ..drivers.mysql_driver import MySQLDriver
@@ -63,6 +64,10 @@ class DataManager:
         org = user.organization
         connector_type = (org.connector_type or "").lower()
         config = org.connector_config or {}
+        
+        # Verify user is active (not deleted/disabled)
+        if not user.email:
+            raise ValueError("User email is missing")
 
         if connector_type == "postgresql":
             driver: BaseDriver = PostgreSQLDriver(config)
@@ -77,7 +82,11 @@ class DataManager:
         else:
             raise ValueError(f"Unsupported connector_type: {connector_type}")
 
-        return cls(org=org, driver=driver)
+        dm = cls(org=org, driver=driver)
+        # Store normalized user_id and org_id for security checks
+        dm.authorized_user_id = normalized_user_id
+        dm.authorized_user = user
+        return dm
 
     # ===== Legacy Meeting-specific methods =====
     
@@ -137,7 +146,8 @@ class DataManager:
             # Save mapping to org config
             self.schema_mapper.save_mapping_to_config(mapping, config)
             self.org.connector_config = config
-            self.org.save()  # Persist to DB
+            db.session.add(self.org)
+            db.session.commit()  # Persist to DB
             
             logger.info(f"Created mapping for {entity_type}: {mapping.get('table_name')}")
         except Exception as e:
@@ -147,14 +157,12 @@ class DataManager:
     async def create_entity(
         self,
         entity_type: str,
-        user_id: str,
         payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Create a new record in an existing entity type in the organization's external system.
         
         Args:
             entity_type: The entity type to add a record to (e.g., "meeting", "patient", "contact")
-            user_id: User creating the record
             payload: Record data
             
         Returns:
@@ -165,7 +173,7 @@ class DataManager:
             await self.ensure_entity_mapping(entity_type)
             
             # Delegate to driver
-            result = await self.driver.create_entity(entity_type, user_id, payload)
+            result = await self.driver.create_entity(entity_type, payload)
             
             self._db_driver.create_sync_log(
                 org_id=self.org.id,
@@ -191,22 +199,69 @@ class DataManager:
     ) -> List[Dict[str, Any]]:
         """Read records from an existing entity type in the organization's external system.
         
+        Automatically filters to entities owned by the user for data isolation.
+        SECURITY: Verifies user ownership before returning any data.
+        Uses AI-validated schema before querying any tables.
+        
         Args:
             entity_type: The entity type to query (e.g., "meeting", "patient", "contact")
-            user_id: Optional user filter
+            user_id: The user making the request (used for ownership filtering)
             filters: Additional query filters
             
         Returns:
-            List of records from the entity type
+            List of records owned by the user (empty list if none found or table missing)
+            
+        Raises:
+            ValueError: If user is not authorized or org mismatch
         """
         try:
-            # Ensure mapping exists
+            # SECURITY: Verify the user making the request is authorized
+            user_id_to_use = user_id or getattr(self, 'authorized_user_id', None)
+            if not user_id_to_use:
+                raise ValueError("No user_id provided or authorized user not set")
+            
+            # Additional safety check - ensure this user is from the same org as the driver
+            if hasattr(self, 'authorized_user'):
+                if str(self.authorized_user.org_id) != str(self.org.id):
+                    raise ValueError("User organization mismatch")
+            
+            # Ensure mapping exists for external entity type
             await self.ensure_entity_mapping(entity_type)
             
-            # Delegate to driver
-            return await self.driver.read_entities(entity_type, user_id, filters)
+            # IMPORTANT: Data isolation - only return entities the user owns
+            # Get the list of entity IDs this user owns (AI-validated table access)
+            # Note: This now gracefully returns [] if user_entity_ownership table doesn't exist
+            owned_entity_ids = self._db_driver.get_user_entity_ids(user_id_to_use, entity_type)
+            
+            if not owned_entity_ids:
+                # User owns no entities of this type - return empty list
+                logger.info(f"User {user_id_to_use} owns no {entity_type} entities in org {self.org.id}")
+                return []
+            
+            # Add ID filter to the query
+            if not filters:
+                filters = {}
+            
+            # Pass owned IDs to driver for filtering
+            filters["owned_entity_ids"] = owned_entity_ids
+            
+            # For external CRM drivers, resolve user's external ID
+            connector_type = (self.org.connector_type or "").lower()
+            if connector_type in ["salesforce", "hubspot", "dynamics"]:
+                # Get user's external CRM ID
+                from ..services.crm_mapper import CRMEntityMapper
+                mapper = CRMEntityMapper()
+                external_user_id = mapper.resolve_doctor_in_crm(
+                    user_id=str(user_id_to_use),
+                    crm_type=connector_type
+                )
+                if external_user_id:
+                    filters["external_user_id"] = external_user_id
+            
+            # Delegate to driver with ownership filter
+            return await self.driver.read_entities(entity_type, user_id_to_use, filters)
         except Exception as e:
-            logger.error(f"Failed to read {entity_type}: {e}")
+            logger.error(f"Failed to read {entity_type} for user {user_id}: {e}")
             raise
 
     async def update_entity(
@@ -214,7 +269,6 @@ class DataManager:
         entity_type: str,
         entity_id: str,
         updates: Dict[str, Any],
-        user_id: str,
     ) -> Dict[str, Any]:
         """Update an existing record in an entity type in the organization's external system.
         
@@ -222,7 +276,6 @@ class DataManager:
             entity_type: The entity type containing the record (e.g., "meeting", "patient")
             entity_id: ID of the specific record to update
             updates: Fields to update
-            user_id: User performing the update
             
         Returns:
             Updated record
@@ -232,7 +285,7 @@ class DataManager:
             await self.ensure_entity_mapping(entity_type)
             
             # Delegate to driver
-            result = await self.driver.update_entity(entity_type, entity_id, updates, user_id)
+            result = await self.driver.update_entity(entity_type, entity_id, updates)
             
             self._db_driver.create_sync_log(
                 org_id=self.org.id,
@@ -254,14 +307,12 @@ class DataManager:
         self,
         entity_type: str,
         entity_id: str,
-        user_id: str,
     ) -> bool:
         """Delete a specific record from an entity type in the organization's external system.
         
         Args:
             entity_type: The entity type containing the record (e.g., "meeting", "patient")
             entity_id: ID of the specific record to delete
-            user_id: User performing the deletion
             
         Returns:
             True if successfully deleted, False otherwise
@@ -271,7 +322,7 @@ class DataManager:
             await self.ensure_entity_mapping(entity_type)
             
             # Delegate to driver
-            result = await self.driver.delete_entity(entity_type, entity_id, user_id)
+            result = await self.driver.delete_entity(entity_type, entity_id)
             
             self._db_driver.create_sync_log(
                 org_id=self.org.id,

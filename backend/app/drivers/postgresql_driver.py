@@ -230,7 +230,6 @@ class PostgreSQLDriver(BaseDriver):
     async def create_entity(
         self,
         entity_type: str,
-        user_id: str,
         payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Create an entity using dynamic query builder based on schema mapping."""
@@ -270,13 +269,18 @@ class PostgreSQLDriver(BaseDriver):
             
             builder = DynamicQueryBuilder(mapping)
             
-            # Add user_id filter if provided
-            if user_id and "user_id" in builder.column_mapping:
-                if not filters:
-                    filters = {}
-                filters["user_id"] = user_id
+            # Extract limit from filters (should not be treated as a WHERE clause filter)
+            limit = 20
+            query_filters = {}
+            if filters:
+                limit = filters.pop("limit", 20)
+                query_filters = {k: v for k, v in filters.items() if v is not None}
             
-            sql, params = builder.build_select(filters=filters, limit=filters.get("limit", 20) if filters else 20)
+            # Add user_id filter only if it's actually mapped to a column
+            if user_id and "user_id" in builder.column_mapping and builder.column_mapping["user_id"]:
+                query_filters["user_id"] = user_id
+            
+            sql, params = builder.build_select(filters=query_filters if query_filters else None, limit=limit)
             
             with self.get_session() as session:
                 results = session.execute(text(sql), params).fetchall()
@@ -291,7 +295,6 @@ class PostgreSQLDriver(BaseDriver):
         entity_type: str,
         entity_id: str,
         updates: Dict[str, Any],
-        user_id: str,
     ) -> Dict[str, Any]:
         """Update an entity using dynamic queries."""
         try:
@@ -319,7 +322,6 @@ class PostgreSQLDriver(BaseDriver):
         self,
         entity_type: str,
         entity_id: str,
-        user_id: str,
     ) -> bool:
         """Delete an entity using dynamic queries."""
         try:

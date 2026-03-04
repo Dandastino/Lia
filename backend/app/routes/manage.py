@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent / "backend"))
 
 from app import create_app
 from app.extensions import db
-from app.models import Organization, User
+from app.models import Organization, User, UserEntityOwnership, DatabaseDriver
 import bcrypt
 from uuid import UUID
 
@@ -156,6 +156,78 @@ def delete_organization(org_id: str):
             db.session.rollback()
 
 
+def assign_entity_to_user(email: str, entity_type: str, entity_id: str):
+    """Assign an external entity (e.g., patient) to a user (e.g., doctor)."""
+    with app.app_context():
+        try:
+            user = User.query.filter_by(email=email).first()
+            if not user:
+                print(f"✗ User not found: {email}")
+                return
+            
+            db_driver = DatabaseDriver()
+            ownership = db_driver.assign_entity_to_user(
+                user_id=user.id,
+                org_id=user.org_id,
+                entity_type=entity_type,
+                external_entity_id=entity_id,
+            )
+            
+            if ownership:
+                print(f"✓ Assigned {entity_type} '{entity_id}' to {email}")
+            else:
+                print(f"✗ Failed to assign {entity_type} '{entity_id}' (duplicate?)")
+        except Exception as e:
+            print(f"✗ Failed to assign entity: {e}")
+            db.session.rollback()
+
+
+def list_user_entities(email: str, entity_type: str):
+    """List all entities owned by a user."""
+    with app.app_context():
+        try:
+            user = User.query.filter_by(email=email).first()
+            if not user:
+                print(f"✗ User not found: {email}")
+                return
+            
+            db_driver = DatabaseDriver()
+            ownerships = db_driver.get_user_owned_entities_safe(user.id, entity_type)
+            
+            if not ownerships:
+                print(f"No {entity_type} entities owned by {email}")
+                return
+            
+            print(f"\nEntities owned by {email} ({entity_type}):")
+            print(f"{'Entity ID':<40} {'Created':<30}")
+            print("-" * 70)
+            for ownership in ownerships:
+                created = ownership.get("created_at", "N/A")
+                print(f"{ownership.get('external_entity_id', 'N/A'):<40} {created:<30}")
+        except Exception as e:
+            print(f"✗ Failed to list entities: {e}")
+
+
+def remove_entity_from_user(email: str, entity_type: str, entity_id: str):
+    """Remove entity ownership from a user."""
+    with app.app_context():
+        try:
+            user = User.query.filter_by(email=email).first()
+            if not user:
+                print(f"✗ User not found: {email}")
+                return
+            
+            db_driver = DatabaseDriver()
+            removed = db_driver.remove_entity_from_user_safe(user.id, entity_type, entity_id)
+            
+            if removed:
+                print(f"✓ Removed {entity_type} '{entity_id}' from {email}")
+            else:
+                print(f"✗ Entity '{entity_id}' not owned by {email} or could not be removed")
+        except Exception as e:
+            print(f"✗ Failed to remove entity: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Lia Assistant - Development Management CLI",
@@ -179,6 +251,15 @@ Examples:
   
   # Delete an organization
   python manage.py org delete <uuid>
+  
+  # Assign a patient to a doctor
+  python manage.py entity assign-to-user doctor@clinic.com patient 12345
+  
+  # List patients owned by a doctor
+  python manage.py entity list-owned doctor@clinic.com patient
+  
+  # Remove patient from doctor
+  python manage.py entity remove-from-user doctor@clinic.com patient 12345
         """,
     )
 
@@ -213,6 +294,24 @@ Examples:
     user_delete = user_subparsers.add_parser("delete", help="Delete user")
     user_delete.add_argument("email", help="User email")
 
+    # Entity ownership commands
+    entity_parser = subparsers.add_parser("entity", help="Entity ownership management (patient assignments, etc.)")
+    entity_subparsers = entity_parser.add_subparsers(dest="action", help="Action")
+
+    entity_assign = entity_subparsers.add_parser("assign-to-user", help="Assign entity to user")
+    entity_assign.add_argument("email", help="User email (e.g., doctor)")
+    entity_assign.add_argument("entity_type", help="Entity type (e.g., patient, contact, deal)")
+    entity_assign.add_argument("entity_id", help="External entity ID from CRM")
+
+    entity_list = entity_subparsers.add_parser("list-owned", help="List entities owned by user")
+    entity_list.add_argument("email", help="User email")
+    entity_list.add_argument("entity_type", help="Entity type (e.g., patient, contact, deal)")
+
+    entity_remove = entity_subparsers.add_parser("remove-from-user", help="Remove entity from user")
+    entity_remove.add_argument("email", help="User email")
+    entity_remove.add_argument("entity_type", help="Entity type (e.g., patient, contact, deal)")
+    entity_remove.add_argument("entity_id", help="External entity ID from CRM")
+
     args = parser.parse_args()
 
     if not args.resource:
@@ -239,6 +338,16 @@ Examples:
             delete_user(args.email)
         else:
             user_parser.print_help()
+
+    elif args.resource == "entity":
+        if args.action == "assign-to-user":
+            assign_entity_to_user(args.email, args.entity_type, args.entity_id)
+        elif args.action == "list-owned":
+            list_user_entities(args.email, args.entity_type)
+        elif args.action == "remove-from-user":
+            remove_entity_from_user(args.email, args.entity_type, args.entity_id)
+        else:
+            entity_parser.print_help()
 
 
 if __name__ == "__main__":
