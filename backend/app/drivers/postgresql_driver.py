@@ -241,6 +241,68 @@ class PostgreSQLDriver(BaseDriver):
             
             builder = DynamicQueryBuilder(mapping)
             sql, params = builder.build_insert(payload)
+
+            # Validate and enrich insert for required DB columns before execution.
+            # This avoids late IntegrityError when auto-mapping misses required fields
+            # (e.g., patient tables with separate nome/cognome columns).
+            table_name = builder.table_name
+            inspector = inspect(self.engine)
+            table_columns = inspector.get_columns(table_name)
+
+            required_columns = []
+            for col in table_columns:
+                col_name = col.get("name")
+                if not col_name or col_name == builder.id_column:
+                    continue
+
+                # Column is required if NOT NULL and has no server default.
+                if col.get("nullable", True):
+                    continue
+                if col.get("default") is not None:
+                    continue
+                if col.get("autoincrement"):
+                    continue
+
+                required_columns.append(col_name)
+
+            missing_required = [col for col in required_columns if col not in params]
+
+            # Best-effort fallback for common patient schemas requiring surname.
+            if missing_required and isinstance(payload.get("title"), str):
+                title_value = payload["title"].strip()
+                if title_value:
+                    first_name_columns = {"nome", "first_name", "firstname", "given_name"}
+                    last_name_columns = {"cognome", "last_name", "lastname", "surname", "family_name"}
+
+                    mapped_first_col = next(
+                        (
+                            col
+                            for col in first_name_columns
+                            if col in params and isinstance(params[col], str) and params[col].strip() == title_value
+                        ),
+                        None,
+                    )
+                    missing_last_cols = [col for col in missing_required if col in last_name_columns]
+
+                    if mapped_first_col and missing_last_cols:
+                        name_parts = [part for part in title_value.split() if part]
+                        if len(name_parts) >= 2:
+                            params[mapped_first_col] = " ".join(name_parts[:-1])
+                            for last_col in missing_last_cols:
+                                params[last_col] = name_parts[-1]
+
+            # Recompute missing required after fallback and fail early with clear context.
+            missing_required = [col for col in required_columns if col not in params]
+            if missing_required:
+                raise ValueError(
+                    f"Cannot create {entity_type}: missing required columns {missing_required} for table {table_name}. "
+                    "Provide richer payload fields or adjust schema mapping."
+                )
+
+            # Rebuild SQL in case params were enriched.
+            columns_str = ", ".join(params.keys())
+            placeholders = ", ".join([f":{k}" for k in params.keys()])
+            sql = f"INSERT INTO {table_name} ({columns_str}) VALUES ({placeholders}) RETURNING *"
             
             with self.get_session() as session:
                 result = session.execute(text(sql), params)

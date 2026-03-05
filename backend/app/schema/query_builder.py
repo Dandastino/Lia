@@ -33,7 +33,12 @@ class DynamicQueryBuilder:
         self.entity_type = mapping.get("entity_type")
         self.table_name = mapping.get("table_name")
         self.id_column = mapping.get("id_column", "id")
-        self.column_mapping = mapping.get("column_mapping", {})
+        raw_column_mapping = mapping.get("column_mapping", {})
+        self.column_mapping = {
+            normalized_field: db_column.strip()
+            for normalized_field, db_column in raw_column_mapping.items()
+            if isinstance(db_column, str) and db_column.strip()
+        }
         
         # Reverse mapping for output normalization
         self.reverse_mapping = {v: k for k, v in self.column_mapping.items()}
@@ -150,6 +155,9 @@ class DynamicQueryBuilder:
         db_updates = {}
         for norm_field, new_value in updates.items():
             db_column = self.column_mapping.get(norm_field, norm_field)
+            if not isinstance(db_column, str) or not db_column.strip():
+                logger.debug(f"Skipping update field {norm_field}: no mapped column")
+                continue
             db_updates[db_column] = new_value
         
         if not db_updates:
