@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from typing import Optional, List
+from typing import Optional, List, Any, Dict
 from uuid import UUID
 import bcrypt
+import logging
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
 
 from .extensions import db
+
+logger = logging.getLogger(__name__)
 
 
 def _uuid_server_default():
@@ -69,11 +72,7 @@ class SyncLog(db.Model):
 
 
 class UserEntityOwnership(db.Model):
-    """Maps external CRM entities (patients, contacts, etc.) to their owning user (doctor).
-    
-    This enables data isolation so that doctors only see records they own.
-    Example: Doctor "Andrea" owns patients with external_entity_ids [123, 456, 789]
-    """
+    """Maps external CRM entities (patients, contacts, etc.) to their owning user (doctor)."""
 
     __tablename__ = "user_entity_ownership"
 
@@ -95,16 +94,7 @@ class UserEntityOwnership(db.Model):
 
 
 class ExternalUserMapping(db.Model):
-    """Maps LIA internal users to their external CRM identities.
-    
-    Example:
-    - LIA user_id: "abc-123" (Andrea)
-    - Salesforce: external_user_id = "SF-999"
-    - HubSpot: external_user_id = "HS-555"
-    
-    When Andrea logs in, LIA knows to query Salesforce with SF-999
-    to get only her patients/records.
-    """
+    """Maps LIA internal users to their external CRM identities."""
 
     __tablename__ = "external_user_mapping"
 

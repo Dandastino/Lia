@@ -14,8 +14,8 @@ import sys
 import argparse
 from pathlib import Path
 
-# Add backend to path
-sys.path.insert(0, str(Path(__file__).parent / "backend"))
+# Add current directory to path for app imports
+sys.path.insert(0, str(Path(__file__).parent))
 
 from app import create_app
 from app.extensions import db

@@ -117,7 +117,7 @@ class HubSpotDriver(BaseDriver):
             logger.error(f"Failed to introspect HubSpot schema: {e}")
             raise
 
-    async def create_entity(self, entity_type: str, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_entity(self, entity_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         try:
             mapping = self.config.get("schema_mappings", {}).get(entity_type)
             if not mapping:
@@ -174,6 +174,11 @@ class HubSpotDriver(BaseDriver):
             response.raise_for_status()
             results = response.json().get("results", [])
             
+            # Data isolation: filter by owned entity IDs if provided
+            owned_entity_ids = filters.get("owned_entity_ids", []) if filters else []
+            if owned_entity_ids:
+                results = [r for r in results if r.get("id") in owned_entity_ids]
+            
             return [
                 {
                     "id": r.get("id"),
@@ -186,7 +191,7 @@ class HubSpotDriver(BaseDriver):
             logger.error(f"Failed to read {entity_type}: {e}")
             raise
 
-    async def update_entity(self, entity_type: str, entity_id: str, updates: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    async def update_entity(self, entity_type: str, entity_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         try:
             mapping = self.config.get("schema_mappings", {}).get(entity_type)
             if not mapping:
@@ -219,7 +224,7 @@ class HubSpotDriver(BaseDriver):
             logger.error(f"Failed to update {entity_type}: {e}")
             raise
 
-    async def delete_entity(self, entity_type: str, entity_id: str, user_id: str) -> bool:
+    async def delete_entity(self, entity_type: str, entity_id: str) -> bool:
         try:
             mapping = self.config.get("schema_mappings", {}).get(entity_type)
             if not mapping:

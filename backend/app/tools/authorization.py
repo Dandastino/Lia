@@ -170,3 +170,48 @@ def verify_user_by_email(
         return None
     
     return User.query.filter_by(email=email.lower().strip()).first()
+
+
+def require_admin(f: Callable) -> Callable:
+    """
+    Decorator to enforce admin-only access to routes.
+    
+    Must be used with @jwt_required() decorator.
+    
+    Usage:
+        @app.route("/admin/dashboard")
+        @jwt_required()
+        @require_admin
+        def admin_dashboard(admin_user):
+            # admin_user is automatically injected
+            return jsonify({"message": f"Welcome admin {admin_user.email}"})
+    
+    Verifies:
+    1. JWT token is valid
+    2. User exists  
+    3. User has admin or owner role
+    
+    Injects:
+        admin_user: The authenticated admin User object
+    
+    Returns:
+        403 if not admin, otherwise calls decorated function
+    """
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        user_id = get_jwt_identity()
+        if not user_id:
+            return jsonify({"error": "Unauthorized - no user ID in token"}), 403
+        
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "Unauthorized - user not found"}), 403
+        
+        # Check if user has admin privileges
+        if user.role not in ("admin", "owner"):
+            return jsonify({"error": "Unauthorized - admin access required"}), 403
+        
+        # Inject admin_user into function
+        return f(*args, admin_user=user, **kwargs)
+    
+    return wrapper

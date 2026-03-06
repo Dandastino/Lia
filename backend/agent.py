@@ -1,6 +1,5 @@
 from __future__ import annotations
 import json
-from uuid import UUID
 from livekit.agents import (
     AutoSubscribe,
     JobContext,
@@ -16,7 +15,8 @@ from app.config import build_postgres_uri
 from app.extensions import db
 from app.models import User
 from app.tools.middleware import MiddlewareTools
-from app.prompts import build_system_prompt
+from app.prompts import build_system_prompt, build_welcome_message
+from app.utils import normalize_user_id, parse_json_metadata
 import logging
 
 load_dotenv()
@@ -37,20 +37,6 @@ def init_database():
     return app
 
 
-def normalize_user_id(raw_user_id: str | None) -> str | None:
-    if not raw_user_id:
-        return None
-
-    candidate = raw_user_id
-    if raw_user_id.startswith("User_"):
-        candidate = raw_user_id.split("User_", 1)[1]
-
-    try:
-        return str(UUID(candidate))
-    except ValueError:
-        return None
-
-
 async def entrypoint(ctx: JobContext):
     """Main entry point for the multi-tenant Lia agent."""
     app = init_database()
@@ -66,19 +52,8 @@ async def entrypoint(ctx: JobContext):
             raise
 
         # Derive user_id from job metadata, participant metadata, or participant identity.
-        job_metadata = ctx.job.metadata or {}
-        if isinstance(job_metadata, str):
-            try:
-                job_metadata = json.loads(job_metadata)
-            except Exception:
-                job_metadata = {}
-
-        participant_metadata = getattr(participant, "metadata", None) or {}
-        if isinstance(participant_metadata, str):
-            try:
-                participant_metadata = json.loads(participant_metadata)
-            except Exception:
-                participant_metadata = {}
+        job_metadata = parse_json_metadata(ctx.job.metadata)
+        participant_metadata = parse_json_metadata(getattr(participant, "metadata", None))
 
         participant_identity = getattr(participant, "identity", None)
         raw_user_id = (
@@ -99,11 +74,15 @@ async def entrypoint(ctx: JobContext):
         connector_config = getattr(org, "connector_config", None) if org else None
         prompt_overrides = (connector_config or {}).get("prompt_overrides") if connector_config else None
 
-        instructions = build_system_prompt(
+        system_prompt = build_system_prompt(
             org_name=org_name,
             org_industry=org_industry,
             extra_rules=prompt_overrides,
         )
+        
+        # Add welcome message to instructions
+        welcome_msg = build_welcome_message(org_industry)
+        instructions = f"{welcome_msg}\n\n{system_prompt}"
 
         # Initialize the AI model
         model = openai.realtime.RealtimeModel(

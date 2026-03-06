@@ -34,7 +34,7 @@ def build_postgres_uri() -> str:
 class Config:
     SQLALCHEMY_DATABASE_URI = build_postgres_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-this")
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=24)
     CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
     DEBUG = os.getenv("DEBUG", "False").lower() == "true"

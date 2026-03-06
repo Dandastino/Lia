@@ -11,70 +11,18 @@ from sqlalchemy.dialects.postgresql import UUID as JSONB
 import uuid
 
 from .base import BaseDriver
-from ..schema.inspector import SchemaInspector
+from ..schema.inspector import SchemaInspector, BaseSQLSchemaInspector
 from ..schema.query_builder import DynamicQueryBuilder
+from ..utils import MeetingFormatter, QueryFilterBuilder
 
 logger = logging.getLogger("postgresql_driver")
 
 Base = declarative_base()
 
 
-class PostgreSQLSchemaInspector(SchemaInspector):
-    """PostgreSQL-specific schema introspection using SQLAlchemy."""
-
-    def __init__(self, engine):
-        self.engine = engine
-
-    async def introspect_tables(self) -> List[Dict[str, Any]]:
-        """Introspect all tables in the database."""
-        inspector = inspect(self.engine)
-        tables = []
-        
-        for table_name in inspector.get_table_names():
-            columns = inspector.get_columns(table_name)
-            column_names = [col["name"] for col in columns]
-            column_types = {col["name"]: str(col["type"]) for col in columns}
-            
-            tables.append({
-                "name": table_name,
-                "columns": column_names,
-                "column_types": column_types,
-            })
-        
-        return tables
-
-    async def introspect_table(self, table_name: str) -> Dict[str, Any]:
-        """Introspect a specific table."""
-        inspector = inspect(self.engine)
-        columns = inspector.get_columns(table_name)
-        pk = inspector.get_pk_constraint(table_name)
-        indexes = inspector.get_indexes(table_name)
-        fks = inspector.get_foreign_keys(table_name)
-        
-        return {
-            "name": table_name,
-            "columns": [
-                {
-                    "name": col["name"],
-                    "type": str(col["type"]),
-                    "nullable": col.get("nullable", True),
-                    "default": col.get("default"),
-                }
-                for col in columns
-            ],
-            "primary_keys": pk.get("constrained_columns", []) if pk else [],
-            "indexes": indexes,
-            "foreign_keys": fks,
-        }
-
-    async def infer_id_column(self, table_name: str) -> Optional[str]:
-        """Infer the primary key column."""
-        inspector = inspect(self.engine)
-        pk = inspector.get_pk_constraint(table_name)
-        if pk and pk.get("constrained_columns"):
-            return pk["constrained_columns"][0]
-        return None
-
+class PostgreSQLSchemaInspector(BaseSQLSchemaInspector):
+    """PostgreSQL schema introspector using shared SQL logic."""
+    pass
 
 
 class ExternalMeeting(Base):
@@ -163,19 +111,17 @@ class PostgreSQLDriver(BaseDriver):
                     meeting_metadata=payload.get("metadata", {}),
                 )
                 session.add(meeting)
-                
-                # Flush to get the ID before commit
                 session.flush()
 
-                return {
-                    "id": meeting.id,
-                    "title": meeting.title,
-                    "summary": meeting.summary,
-                    "participants": meeting.participants,
-                    "metadata": meeting.meeting_metadata,
-                    "created_at": meeting.created_at.isoformat() if meeting.created_at else None,
-                    "source": "external_postgresql",
-                }
+                return MeetingFormatter.format_meeting_response(
+                    meeting_id=meeting.id,
+                    title=meeting.title,
+                    summary=meeting.summary,
+                    participants=meeting.participants,
+                    metadata=meeting.meeting_metadata,
+                    created_at=meeting.created_at,
+                    source="external_postgresql",
+                )
         except Exception as e:
             raise Exception(f"Failed to save meeting to external PostgreSQL: {str(e)}")
 
@@ -345,9 +291,9 @@ class PostgreSQLDriver(BaseDriver):
             sql, params = builder.build_select(filters=query_filters if query_filters else None, limit=limit)
             
             with self.get_session() as session:
-                results = session.execute(text(sql), params).fetchall()
-                rows = [dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(session.execute(text(sql), params).keys(), row)) for row in results]
-                return builder.normalize_rows(rows)
+                result = session.execute(text(sql), params)
+                rows = [dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(result.keys(), row)) for row in result.fetchall()]
+                return [builder.normalize_row(row) for row in rows]
         except Exception as e:
             logger.error(f"Failed to read {entity_type}: {e}")
             raise

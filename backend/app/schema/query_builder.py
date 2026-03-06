@@ -28,17 +28,52 @@ class DynamicQueryBuilder:
                     "column_mapping": {...},
                     "confidence": 0.95
                 }
+                
+        Raises:
+            ValueError: If table_name, id_column, or column_mapping is missing or invalid.
         """
         self.mapping = mapping
         self.entity_type = mapping.get("entity_type")
         self.table_name = mapping.get("table_name")
         self.id_column = mapping.get("id_column", "id")
+        
+        # Validate required fields
+        if not self.table_name:
+            raise ValueError(f"Mapping missing required field 'table_name': {mapping}")
+        if not self.id_column:
+            raise ValueError(f"Mapping missing required field 'id_column': {mapping}")
+        
         raw_column_mapping = mapping.get("column_mapping", {})
-        self.column_mapping = {
-            normalized_field: db_column.strip()
-            for normalized_field, db_column in raw_column_mapping.items()
-            if isinstance(db_column, str) and db_column.strip()
-        }
+        
+        if not isinstance(raw_column_mapping, dict):
+            raise ValueError(
+                f"Invalid column_mapping: must be dict, got {type(raw_column_mapping).__name__}"
+            )
+        
+        # Build column mapping, filtering out None/empty values but raising error if found
+        self.column_mapping = {}
+        invalid_columns = {}
+        
+        for normalized_field, db_column in raw_column_mapping.items():
+            if db_column is None:
+                invalid_columns[normalized_field] = None
+            elif isinstance(db_column, str):
+                stripped = db_column.strip()
+                if stripped:
+                    self.column_mapping[normalized_field] = stripped
+                else:
+                    invalid_columns[normalized_field] = db_column
+            else:
+                invalid_columns[normalized_field] = db_column
+        
+        # Raise error if any invalid columns found
+        if invalid_columns:
+            raise ValueError(
+                f"Invalid column_mapping for {self.entity_type}: contains None or empty values. "
+                f"Invalid fields: {invalid_columns}. "
+                f"Ensure all normalized fields map to actual DB columns. "
+                f"Full mapping: {raw_column_mapping}"
+            )
         
         # Reverse mapping for output normalization
         self.reverse_mapping = {v: k for k, v in self.column_mapping.items()}

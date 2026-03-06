@@ -58,7 +58,13 @@ class DynamicsDriver(BaseDriver):
             "OData-Version": "4.0",
         }
 
-    def save_meeting(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def save_meeting(self, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Save meeting to Dynamics 365 as phone call activity.
+        
+        Args:
+            user_id: User identifier (not used by Dynamics, kept for interface consistency)
+            payload: Meeting data
+        """
         headers = self._get_headers()
         activity_data = {
             "subject": payload.get("title", "Meeting"),
@@ -185,7 +191,7 @@ class DynamicsDriver(BaseDriver):
             logger.error(f"Failed to create {entity_type}: {e}")
             raise
 
-    async def read_entities(self, entity_type: str, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    async def read_entities(self, entity_type: str, user_id: Optional[str] = None, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         try:
             mapping = self.config.get("schema_mappings", {}).get(entity_type)
             if not mapping:
@@ -198,7 +204,15 @@ class DynamicsDriver(BaseDriver):
             fields = ",".join(column_mapping.values())
             limit = filters.get("limit", 20) if filters else 20
             id_field = mapping.get("id_column", f"{entity_name}id")
-            query = f"/api/data/v9.2/{entity_name}?$select={fields},{id_field}&$top={limit}&$orderby=createdon desc"
+            
+            # Data isolation: filter by owned entity IDs at query level (OData $filter parameter)
+            owned_entity_ids = filters.get("owned_entity_ids", []) if filters else []
+            filter_clause = ""
+            if owned_entity_ids:
+                id_filters = " or ".join([f"{id_field} eq '{id}'" for id in owned_entity_ids])
+                filter_clause = f"&$filter={id_filters}"
+            
+            query = f"/api/data/v9.2/{entity_name}?$select={fields},{id_field}&$top={limit}&$orderby=createdon desc{filter_clause}"
             
             response = requests.get(f"{self.dynamics_url}{query}", headers=headers, verify=self.verify_ssl)
             response.raise_for_status()

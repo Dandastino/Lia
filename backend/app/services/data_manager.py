@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import logging
-from uuid import UUID
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
 
 from ..models import Organization, User, DatabaseDriver
 from ..extensions import db
@@ -13,6 +12,7 @@ from ..drivers.hubspot_driver import HubSpotDriver
 from ..drivers.salesforce_driver import SalesforceDriver
 from ..drivers.dynamics_driver import DynamicsDriver
 from ..schema.mapper import SchemaMappingService
+from ..utils import normalize_user_id
 
 logger = logging.getLogger("data_manager")
 
@@ -22,10 +22,6 @@ class DataManager:
     
     Supports both legacy meeting-specific operations and
     new generic CRUD for managing records within existing entity types.
-    
-    Note: This does NOT create new entity types/tables. It only manages
-    records (add/read/update/delete) within pre-existing entity types like
-    meetings, patients, contacts, deals, etc.
     """
 
     def __init__(self, org: Organization, driver: BaseDriver):
@@ -34,23 +30,49 @@ class DataManager:
         self._db_driver = DatabaseDriver()
         self.schema_mapper = SchemaMappingService()
 
-    @staticmethod
-    def normalize_user_id(raw_user_id: str | None) -> str | None:
-        if not raw_user_id:
-            return None
-
-        candidate = raw_user_id
-        if raw_user_id.startswith("User_"):
-            candidate = raw_user_id.split("User_", 1)[1]
-
+    def _log_sync_operation(self, operation: Callable, *args, **kwargs) -> Any:
+        """Execute an operation with automatic sync logging."""
         try:
-            return str(UUID(candidate))
-        except ValueError:
-            return None
+            result = operation(*args, **kwargs)
+            self._db_driver.create_sync_log(
+                org_id=self.org.id,
+                status="success",
+                target_system=self.org.connector_type or "unknown",
+                error_message=None,
+            )
+            return result
+        except Exception as e:
+            self._db_driver.create_sync_log(
+                org_id=self.org.id,
+                status="failed",
+                target_system=self.org.connector_type or "unknown",
+                error_message=str(e),
+            )
+            raise
+
+    async def _log_sync_operation_async(self, operation: Callable, *args, **kwargs) -> Any:
+        """Async version of _log_sync_operation."""
+        try:
+            result = await operation(*args, **kwargs)
+            self._db_driver.create_sync_log(
+                org_id=self.org.id,
+                status="success",
+                target_system=self.org.connector_type or "unknown",
+                error_message=None,
+            )
+            return result
+        except Exception as e:
+            self._db_driver.create_sync_log(
+                org_id=self.org.id,
+                status="failed",
+                target_system=self.org.connector_type or "unknown",
+                error_message=str(e),
+            )
+            raise
 
     @classmethod
     def from_user_id(cls, user_id: str) -> "DataManager":
-        normalized_user_id = cls.normalize_user_id(user_id)
+        normalized_user_id = normalize_user_id(user_id)
         if not normalized_user_id:
             raise ValueError("Missing or invalid user_id in agent context")
 
@@ -91,23 +113,11 @@ class DataManager:
     # ===== Legacy Meeting-specific methods =====
     
     def save_meeting(self, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        try:
-            result = self.driver.save_meeting(user_id, payload)
-            self._db_driver.create_sync_log(
-                org_id=self.org.id,
-                status="success",
-                target_system=self.org.connector_type or "unknown",
-                error_message=None,
-            )
-            return result
-        except Exception as e:
-            self._db_driver.create_sync_log(
-                org_id=self.org.id,
-                status="failed",
-                target_system=self.org.connector_type or "unknown",
-                error_message=str(e),
-            )
-            raise
+        return self._log_sync_operation(
+            self.driver.save_meeting,
+            user_id,
+            payload
+        )
 
     def get_meeting_history(
         self,
@@ -161,35 +171,35 @@ class DataManager:
     ) -> Dict[str, Any]:
         """Create a new record in an existing entity type in the organization's external system.
         
-        Args:
-            entity_type: The entity type to add a record to (e.g., "meeting", "patient", "contact")
-            payload: Record data
-            
-        Returns:
-            Created record with ID and timestamps
+        Automatically assigns ownership to the current user for data isolation.
         """
-        try:
-            # Ensure mapping exists
-            await self.ensure_entity_mapping(entity_type)
-            
-            # Delegate to driver
-            result = await self.driver.create_entity(entity_type, payload)
-            
-            self._db_driver.create_sync_log(
-                org_id=self.org.id,
-                status="success",
-                target_system=self.org.connector_type or "unknown",
-                error_message=None,
-            )
-            return result
-        except Exception as e:
-            self._db_driver.create_sync_log(
-                org_id=self.org.id,
-                status="failed",
-                target_system=self.org.connector_type or "unknown",
-                error_message=str(e),
-            )
-            raise
+        # Ensure mapping exists
+        await self.ensure_entity_mapping(entity_type)
+        
+        # Delegate to driver with sync logging
+        result = await self._log_sync_operation_async(
+            self.driver.create_entity,
+            entity_type,
+            payload
+        )
+        
+        # AUTO-ASSIGNMENT: Assign ownership to current user
+        if result and result.get("id") and hasattr(self, 'authorized_user_id'):
+            try:
+                self._db_driver.assign_entity_to_user(
+                    user_id=self.authorized_user_id,
+                    org_id=self.org.id,
+                    entity_type=entity_type,
+                    external_entity_id=str(result["id"]),
+                )
+                logger.info(
+                    f"Auto-assigned {entity_type} '{result['id']}' to user {self.authorized_user_id}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to auto-assign ownership: {e}")
+                # Don't fail the whole operation if assignment fails
+        
+        return result
 
     async def read_entities(
         self,
@@ -202,17 +212,6 @@ class DataManager:
         Automatically filters to entities owned by the user for data isolation.
         SECURITY: Verifies user ownership before returning any data.
         Uses AI-validated schema before querying any tables.
-        
-        Args:
-            entity_type: The entity type to query (e.g., "meeting", "patient", "contact")
-            user_id: The user making the request (used for ownership filtering)
-            filters: Additional query filters
-            
-        Returns:
-            List of records owned by the user (empty list if none found or table missing)
-            
-        Raises:
-            ValueError: If user is not authorized or org mismatch
         """
         try:
             # SECURITY: Verify the user making the request is authorized
@@ -270,73 +269,31 @@ class DataManager:
         entity_id: str,
         updates: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Update an existing record in an entity type in the organization's external system.
+        """Update an existing record in an entity type in the organization's external system."""
+        # Ensure mapping exists
+        await self.ensure_entity_mapping(entity_type)
         
-        Args:
-            entity_type: The entity type containing the record (e.g., "meeting", "patient")
-            entity_id: ID of the specific record to update
-            updates: Fields to update
-            
-        Returns:
-            Updated record
-        """
-        try:
-            # Ensure mapping exists
-            await self.ensure_entity_mapping(entity_type)
-            
-            # Delegate to driver
-            result = await self.driver.update_entity(entity_type, entity_id, updates)
-            
-            self._db_driver.create_sync_log(
-                org_id=self.org.id,
-                status="success",
-                target_system=self.org.connector_type or "unknown",
-                error_message=None,
-            )
-            return result
-        except Exception as e:
-            self._db_driver.create_sync_log(
-                org_id=self.org.id,
-                status="failed",
-                target_system=self.org.connector_type or "unknown",
-                error_message=str(e),
-            )
-            raise
+        # Delegate to driver with sync logging
+        return await self._log_sync_operation_async(
+            self.driver.update_entity,
+            entity_type,
+            entity_id,
+            updates
+        )
 
     async def delete_entity(
         self,
         entity_type: str,
         entity_id: str,
     ) -> bool:
-        """Delete a specific record from an entity type in the organization's external system.
+        """Delete a specific record from an entity type in the organization's external system."""
+        # Ensure mapping exists
+        await self.ensure_entity_mapping(entity_type)
         
-        Args:
-            entity_type: The entity type containing the record (e.g., "meeting", "patient")
-            entity_id: ID of the specific record to delete
-            
-        Returns:
-            True if successfully deleted, False otherwise
-        """
-        try:
-            # Ensure mapping exists
-            await self.ensure_entity_mapping(entity_type)
-            
-            # Delegate to driver
-            result = await self.driver.delete_entity(entity_type, entity_id)
-            
-            self._db_driver.create_sync_log(
-                org_id=self.org.id,
-                status="success",
-                target_system=self.org.connector_type or "unknown",
-                error_message=None,
-            )
-            return result
-        except Exception as e:
-            self._db_driver.create_sync_log(
-                org_id=self.org.id,
-                status="failed",
-                target_system=self.org.connector_type or "unknown",
-                error_message=str(e),
-            )
-            raise
+        # Delegate to driver with sync logging
+        return await self._log_sync_operation_async(
+            self.driver.delete_entity,
+            entity_type,
+            entity_id
+        )
 

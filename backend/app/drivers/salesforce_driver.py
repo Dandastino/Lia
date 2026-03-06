@@ -58,7 +58,13 @@ class SalesforceDriver(BaseDriver):
             "Content-Type": "application/json",
         }
 
-    def save_meeting(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def save_meeting(self, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Save meeting to Salesforce as Task record.
+        
+        Args:
+            user_id: User identifier (not used by Salesforce, kept for interface consistency)
+            payload: Meeting data
+        """
         headers = self._get_headers()
         task_data = {
             "Subject": payload.get("title", "Meeting"),
@@ -186,7 +192,7 @@ class SalesforceDriver(BaseDriver):
             logger.error(f"Failed to create {entity_type}: {e}")
             raise
 
-    async def read_entities(self, entity_type: str, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    async def read_entities(self, entity_type: str, user_id: Optional[str] = None, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         try:
             mapping = self.config.get("schema_mappings", {}).get(entity_type)
             if not mapping:
@@ -198,7 +204,15 @@ class SalesforceDriver(BaseDriver):
             
             fields = ", ".join(column_mapping.values())
             limit = filters.get("limit", 20) if filters else 20
-            query = f"SELECT {fields} FROM {sobject_name} ORDER BY CreatedDate DESC LIMIT {limit}"
+            
+            # Data isolation: filter by owned entity IDs at query level (SOQL WHERE clause)
+            owned_entity_ids = filters.get("owned_entity_ids", []) if filters else []
+            where_clause = ""
+            if owned_entity_ids:
+                id_list = ", ".join([f"'{id}'" for id in owned_entity_ids])
+                where_clause = f" WHERE Id IN ({id_list})"
+            
+            query = f"SELECT {fields} FROM {sobject_name}{where_clause} ORDER BY CreatedDate DESC LIMIT {limit}"
             
             response = requests.get(
                 f"{self.instance_url}/services/data/v60.0/query",

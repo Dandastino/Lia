@@ -9,8 +9,7 @@ The mapper maintains bidirectional lookups to handle data isolation properly.
 """
 
 from typing import Optional, Dict, List
-from uuid import UUID
-from ..models import db, User, ExternalUserMapping, DatabaseDriver
+from ..models import db, User, DatabaseDriver
 
 
 class CRMEntityMapper:
@@ -29,16 +28,7 @@ class CRMEntityMapper:
     ) -> bool:
         """
         Register a doctor in LIA with their CRM identity.
-        
-        Example:
-            mapper.register_doctor_to_crm(
-                user_id="abc-123",  # Andrea's LIA ID
-                org_id="org-456",
-                crm_type="salesforce",
-                external_user_id="SF-999",  # Andrea in Salesforce
-                external_email="andrea@test.com"
-            )
-        
+                
         Args:
             user_id: Doctor's LIA UUID
             org_id: Organization UUID
@@ -65,16 +55,7 @@ class CRMEntityMapper:
     ) -> Optional[str]:
         """
         Given a LIA user, find their ID in a specific CRM system.
-        
-        Example:
-            # Andrea logs in, we need to query Salesforce with her SF ID
-            sf_user_id = mapper.resolve_doctor_in_crm(
-                user_id="abc-123",  # Andrea's LIA ID
-                crm_type="salesforce"
-            )
-            # Returns: "SF-999"
-            # Now we can query Salesforce: SELECT * FROM doctors WHERE id = 'SF-999'
-        
+                
         Args:
             user_id: LIA user UUID
             crm_type: CRM system name
@@ -94,20 +75,8 @@ class CRMEntityMapper:
         external_user_id: str,
     ) -> Optional[User]:
         """
-        Given a CRM user ID, find their LIA user record.
-        
-        Useful when processing webhooks or syncing data from external CRM.
-        
-        Example:
-            # Salesforce webhook: "Doctor SF-999 has new patient"
-            user = mapper.resolve_user_from_crm(
-                org_id="org-456",
-                crm_type="salesforce",
-                external_user_id="SF-999"
-            )
-            # Returns: User object for Andrea
-            # Now we know Andrea owns this patient in LIA
-        
+        Given a CRM user ID, find their LIA user record. Useful when processing webhooks or syncing data from external CRM.
+                
         Args:
             org_id: Organization UUID
             crm_type: CRM system name
@@ -128,16 +97,7 @@ class CRMEntityMapper:
     ) -> Dict[str, str]:
         """
         Get all CRM identities for a doctor (multi-CRM support).
-        
-        Example:
-            profile = mapper.get_doctor_crm_profile(user_id="abc-123")
-            # Returns:
-            # {
-            #     "salesforce": "SF-999",
-            #     "hubspot": "HS-555",
-            #     "dynamics": "DYN-111"
-            # }
-        
+                
         Args:
             user_id: LIA user UUID
         

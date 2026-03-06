@@ -1,24 +1,15 @@
 from __future__ import annotations
-
 from typing import Any, Dict, List, Optional
-import logging
-
 from livekit.agents import llm
-
 from ..services.data_manager import DataManager
+
+import logging
 
 logger = logging.getLogger("middleware_tools")
 
 
 class MiddlewareTools:
-    """Industry-agnostic tools that the agent can call.
-    
-    Supports both legacy meeting-specific tools and new generic CRUD for RECORDS:
-    - save_entity() / get_entities() / update_entity() / delete_entity()
-    
-    These tools work with RECORDS within existing entity types (meetings, patients, contacts, deals, etc.).
-    They do NOT create new entity types/tables - only add/modify/delete records within existing ones.
-    """
+    """Industry-agnostic tools that the agent can call. Supports both legacy meeting-specific tools and new generic CRUD operations"""
 
     def __init__(self, user_id: str):
         self.user_id = user_id

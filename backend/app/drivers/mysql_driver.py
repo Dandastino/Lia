@@ -4,72 +4,25 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 from contextlib import contextmanager
 import logging
-from sqlalchemy import create_engine, Column, String, Text, DateTime, inspect, text
+from sqlalchemy import create_engine, Column, String, Text, DateTime, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
 from sqlalchemy.types import JSON
 import uuid
 
 from .base import BaseDriver
-from ..schema.inspector import SchemaInspector
+from ..schema.inspector import BaseSQLSchemaInspector
 from ..schema.query_builder import DynamicQueryBuilder
+from ..utils import MeetingFormatter, QueryFilterBuilder
 
 logger = logging.getLogger("mysql_driver")
 
 Base = declarative_base()
 
 
-class MySQLSchemaInspector(SchemaInspector):
-    
-    def __init__(self, engine):
-        self.engine = engine
-
-    async def introspect_tables(self) -> List[Dict[str, Any]]:
-        inspector = inspect(self.engine)
-        tables = []
-        
-        for table_name in inspector.get_table_names():
-            columns = inspector.get_columns(table_name)
-            column_names = [col["name"] for col in columns]
-            column_types = {col["name"]: str(col["type"]) for col in columns}
-            
-            tables.append({
-                "name": table_name,
-                "columns": column_names,
-                "column_types": column_types,
-            })
-        
-        return tables
-
-    async def introspect_table(self, table_name: str) -> Dict[str, Any]:
-        inspector = inspect(self.engine)
-        columns = inspector.get_columns(table_name)
-        pk = inspector.get_pk_constraint(table_name)
-        indexes = inspector.get_indexes(table_name)
-        fks = inspector.get_foreign_keys(table_name)
-        
-        return {
-            "name": table_name,
-            "columns": [
-                {
-                    "name": col["name"],
-                    "type": str(col["type"]),
-                    "nullable": col.get("nullable", True),
-                    "default": col.get("default"),
-                }
-                for col in columns
-            ],
-            "primary_keys": pk.get("constrained_columns", []) if pk else [],
-            "indexes": indexes,
-            "foreign_keys": fks,
-        }
-
-    async def infer_id_column(self, table_name: str) -> Optional[str]:
-        inspector = inspect(self.engine)
-        pk = inspector.get_pk_constraint(table_name)
-        if pk and pk.get("constrained_columns"):
-            return pk["constrained_columns"][0]
-        return None
+class MySQLSchemaInspector(BaseSQLSchemaInspector):
+    """MySQL schema introspector using shared SQL logic."""
+    pass
 
 
 class ExternalMeeting(Base):
@@ -146,15 +99,15 @@ class MySQLDriver(BaseDriver):
                 session.add(meeting)
                 session.flush()
 
-                return {
-                    "id": meeting.id,
-                    "title": meeting.title,
-                    "summary": meeting.summary,
-                    "participants": meeting.participants,
-                    "metadata": meeting.meeting_metadata,
-                    "created_at": meeting.created_at.isoformat() if meeting.created_at else None,
-                    "source": "external_mysql",
-                }
+                return MeetingFormatter.format_meeting_response(
+                    meeting_id=meeting.id,
+                    title=meeting.title,
+                    summary=meeting.summary,
+                    participants=meeting.participants,
+                    metadata=meeting.meeting_metadata,
+                    created_at=meeting.created_at,
+                    source="external_mysql",
+                )
         except Exception as e:
             raise Exception(f"Failed to save meeting to external MySQL: {str(e)}")
 
@@ -239,9 +192,9 @@ class MySQLDriver(BaseDriver):
             sql, params = builder.build_select(filters=filters, limit=filters.get("limit", 20) if filters else 20)
             
             with self.get_session() as session:
-                results = session.execute(text(sql), params).fetchall()
-                rows = [dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(session.execute(text(sql), params).keys(), row)) for row in results]
-                return builder.normalize_rows(rows)
+                result = session.execute(text(sql), params)
+                rows = [dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(result.keys(), row)) for row in result.fetchall()]
+                return [builder.normalize_row(row) for row in rows]
         except Exception as e:
             logger.error(f"Failed to read {entity_type}: {e}")
             raise

@@ -8,12 +8,12 @@ DEFAULT_LABELS: Dict[Industry, Dict[str, str]] = {
     "generic": {
         "person_label": "client",
         "meeting_label": "meeting",
-        "record_label": "note",
+        "record_label": "client note",
     },
     "medical": {
         "person_label": "patient",
         "meeting_label": "consultation",
-        "record_label": "clinical note",
+        "record_label": "patient note",
     },
     "legal": {
         "person_label": "client",
@@ -22,7 +22,7 @@ DEFAULT_LABELS: Dict[Industry, Dict[str, str]] = {
     },
     "sales": {
         "person_label": "lead",
-        "meeting_label": "call",
+        "meeting_label": "meeting",
         "record_label": "CRM note",
     },
 }
@@ -70,7 +70,7 @@ def build_system_prompt(
             * Medications, products, or services discussed
             * Outcomes or impressions
             * Follow-up plans
-            * Scheduled future {meeting}s
+        * Scheduled future {meeting}s
         * Update client or project databases with the information the {person} specifies.
         * Retrieve past {meeting}s or {record}s when relevant.
         * Ask clarifying questions if information is incomplete or ambiguous.
@@ -112,6 +112,14 @@ def build_system_prompt(
     Tool Usage:
         * When saving, retrieving, or modifying records, always use the appropriate system tools.
         * Never claim data was saved unless the tool call succeeded.
+
+    Available Tools:
+        * save_meeting_tool: Save a summary of the current {meeting}, including participants and key details as requested.
+        * get_history_tool: Retrieve previous {meeting}s and {record}s for additional context as requested.
+        * save_entity_tool: Create a new {record} ({person}, {meeting}, contact, etc.) as requested.
+        * get_entities_tool: Retrieve {record}s from the system. Specify which type you need.
+        * update_entity_tool: Update an existing {record} with new information.
+        * delete_entity_tool: Delete a {record} from the system.
 
     External Information:
         * Use internet access only when information is time-sensitive, factual, or explicitly requested.

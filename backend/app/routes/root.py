@@ -10,7 +10,7 @@ def index():
             "name": "Lia Assistant API",
             "version": "1.0.0",
             "description": "Multi-tenant backend API for Lia with data isolation",
-            "note": "User and organization management is available via Admin UI or CLI (python manage.py)",
+            "note": "User and organization management is available via Admin UI or CLI (python backend/manage.py)",
             "endpoints": {
                 "auth": {
                     "login": "POST /login (email, password)",
