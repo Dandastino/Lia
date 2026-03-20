@@ -1,0 +1,145 @@
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional
+
+
+class BaseDriver(ABC):
+    """Connector driver interface for data operations.
+
+    All drivers implement the same methods so that higher layers
+    remain agnostic to the underlying storage / CRM.
+    
+    Supports both:
+    - Meeting-specific methods (for backwards compatibility)
+    - Generic CRUD for managing records within existing entity types
+    
+    Note: Drivers work with records (rows) in existing entity types (tables).
+    They do NOT create new entity types/tables, only manage records within them.
+    """
+
+    def __init__(self, connector_config: Optional[Dict[str, Any]] = None):
+        self.config = connector_config or {}
+
+    def prepare_meeting_history_filters(
+        self,
+        user_id: str,
+        filters: Optional[Dict[str, Any]] = None,
+        owned_entity_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Return connector-specific filter bag for get_meeting_history.
+
+        Drivers can override this hook to translate generic multi-tenant scope
+        into connector-native query parameters without affecting other drivers.
+        """
+        scoped_filters: Dict[str, Any] = dict(filters or {})
+        if owned_entity_ids:
+            scoped_filters["owned_entity_ids"] = [str(entity_id) for entity_id in owned_entity_ids]
+        return scoped_filters
+
+    # ===== Legacy Meeting-specific methods (keep for backward compatibility) =====
+    
+    @abstractmethod
+    def save_meeting(self, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Persist a meeting record and return a canonical representation."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_meeting_history(
+        self,
+        user_id: str,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return list of meetings for the user/organization."""
+        raise NotImplementedError
+
+    # ===== Generic CRUD methods (new multi-entity support) =====
+    
+    @abstractmethod
+    async def create_entity(
+        self,
+        entity_type: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Create a new record in an existing entity type in the external system.
+        
+        Args:
+            entity_type: The entity type to add a record to (\"meeting\", \"patient\", \"contact\", etc.)
+            payload: Normalized record data {title, summary, user_id, ...}
+            
+        Returns:
+            Created record with id, timestamps, etc.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def read_entities(
+        self,
+        entity_type: str,
+        user_id: Optional[str] = None,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve records from an existing entity type in the external system.
+        
+        Args:
+            entity_type: The entity type to query ("meeting", "patient", "contact", etc.)
+            user_id: Optionally filter by creator/owner (used by SQL drivers)
+            filters: {user_id, created_at_gte, limit, ...}
+            
+        Returns:
+            List of records in normalized format
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def update_entity(
+        self,
+        entity_type: str,
+        entity_id: str,
+        updates: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Update an existing record in an entity type in the external system.
+        
+        Args:
+            entity_type: The entity type containing the record (\"meeting\", \"patient\", etc.)
+            entity_id: ID of the specific record to update
+            updates: Normalized fields to update {title, summary, ...}
+            
+        Returns:
+            Updated record
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def delete_entity(
+        self,
+        entity_type: str,
+        entity_id: str,
+    ) -> bool:
+        """Delete a specific record from an entity type in the external system.
+        
+        Args:
+            entity_type: The entity type containing the record (\"meeting\", \"patient\", etc.)
+            entity_id: ID of the specific record to delete
+            
+        Returns:
+            True if deleted, False if not found
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_schema_info(self) -> Dict[str, Any]:
+        """Return raw database schema for LLM analysis.
+        
+        Returns:
+            {
+                "tables": [
+                    {
+                        "name": "crm_calls",
+                        "columns": ["id", "title", ...],
+                        "column_types": {...}
+                    },
+                    ...
+                ]
+            }
+        """

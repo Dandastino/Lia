@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "Lia",
+    "slug": "lia-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.lia.assistant",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.VIBRATE"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.lia.assistant",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Lia needs microphone access for real-time voice conversations."
+      }
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26,
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35
+          },
+          "ios": {
+            "deploymentTarget": "15.1"
+          }
+        }
+      ],
+      "expo-asset"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e5839652-79a5-4f3d-bf7f-c5e997a051bc"
+      }
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "lia-mobile",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "JAVA_HOME=/usr/lib/jvm/java-17-openjdk ANDROID_HOME=$HOME/Android/Sdk ANDROID_SDK_ROOT=$HOME/Android/Sdk PATH=$PATH:$HOME/Android/Sdk/platform-tools:$HOME/Android/Sdk/emulator:$HOME/Android/Sdk/cmdline-tools/latest/bin expo run:android",
+    "emulator": "ANDROID_HOME=$HOME/Android/Sdk PATH=$PATH:$HOME/Android/Sdk/emulator:$HOME/Android/Sdk/platform-tools emulator -avd Lia_API_35 -gpu swiftshader_indirect -no-snapshot -no-boot-anim -no-audio",
+    "ios": "expo run:ios",
+    "prebuild": "expo prebuild --clean"
+  },
+  "dependencies": {
+    "@livekit/react-native": "2.9.6",
+    "@livekit/react-native-webrtc": "^137.0.2",
+    "@react-native-async-storage/async-storage": "1.23.1",
+    "@react-navigation/native": "^6.1.18",
+    "@react-navigation/native-stack": "^6.11.0",
+    "axios": "^1.6.0",
+    "expo": "~52.0.0",
+    "expo-asset": "~11.0.5",
+    "expo-build-properties": "~0.13.0",
+    "expo-status-bar": "~2.0.0",
+    "livekit-client": "^2.8.0",
+    "react": "18.3.1",
+    "react-native": "0.76.5",
+    "react-native-get-random-values": "~1.11.0",
+    "react-native-safe-area-context": "4.12.0",
+    "react-native-screens": "~4.1.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0"
+  }
+}

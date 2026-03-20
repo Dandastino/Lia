@@ -1,0 +1,22 @@
+# Exclude everything outside the mobile app from EAS uploads
+../backend/
+../frontend/
+../docker-compose.yml
+../docker-compose.production.yml
+../nginx.prod.conf
+../init_db.sql
+../Makefile
+../README.md
+
+# Runtime/socket files
+*.ctl
+*.pid
+
+# Python
+__pycache__/
+*.pyc
+myenv/
+venv/
+
+# Node
+node_modules/

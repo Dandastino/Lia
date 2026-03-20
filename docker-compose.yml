@@ -1,0 +1,102 @@
+services:
+  # PostgreSQL Database for Lia (organizations, users, sync_logs)
+  db:
+    image: postgres:15-alpine
+    container_name: lia_postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-lia_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init_db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-lia_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      lia_network:
+        aliases:
+          - db
+          - lia_postgres
+
+  # Backend API Server
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: lia_backend
+    command: gunicorn --bind 0.0.0.0:5000 --workers 4 --timeout 120 server:app
+    env_file:
+      - ./backend/.env
+    environment:
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-lia_db}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev_secret_key_change_in_production}
+      ENV: ${ENV:-development}
+      DEBUG: ${DEBUG:-False}
+    ports:
+      - "5000:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - lia_network
+    restart: unless-stopped
+
+  # Agent Service (Voice Assistant) - DEV MODE
+  agent:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: lia_agent
+    command: python agent.py dev 
+    env_file:
+      - ./backend/.env
+    environment:
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-lia_db}
+      ENV: ${ENV:-development}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    volumes:
+      - ./backend:/app
+    networks:
+      - lia_network
+    restart: unless-stopped
+
+  # Frontend (React + Vite)
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:5000
+    container_name: lia_frontend
+    ports:
+      - "3001:3000"
+    depends_on:
+      - backend
+    networks:
+      - lia_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  lia_network:
+    driver: bridge
