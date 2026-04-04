@@ -12,14 +12,13 @@
 ![Docker](https://img.shields.io/badge/Container-Docker-2496ED?logo=docker&logoColor=white)
 ![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)
 
-## Table of Contents
-------------------
-- [Project Demo Video](#project-demo-video) • [🚀 Project Overview](#-project-overview) • [📥 Setup Guide](#setup-guide) • [📖 How to Use](#-how-to-use) • [💡 Optimizations](#-optimizations) • [License](#license)
+• [📹 Project Demo Video](#project-demo-video) • [🚀 Project Overview](#-project-overview) • [📥 Setup Guide](#setup-guide) • [📖 How to Use](#-how-to-use) • [💡 Optimizations](#-optimizations) • [License](#license)
 
-## Project Demo Video
-------------------------------
+## 📹 Project Demo Video
+
 <video src="assets/Lia.mp4" controls muted playsinline></video>
 
+------------------------------
 ## 🚀 Project Overview
 
 Lia is a multi-tenant AI assistant designed for organizations that need a voice-first workflow to manage meetings, notes, and customer records.
