@@ -1,4 +1,6 @@
-# Lia - Your AI Assistant
+# 📊 Lia - Multi-Tenant AI Voice Assistant
+-----------------------
+*Lia helps teams manage meetings and customer data through natural voice interactions, while keeping each organization's data in its own CRM or database.*
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask&logoColor=white)
@@ -8,177 +10,179 @@
 ![OpenAI](https://img.shields.io/badge/LLM-OpenAI-412991?logo=openai&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-4169E1?logo=postgresql&logoColor=white)
 ![Docker](https://img.shields.io/badge/Container-Docker-2496ED?logo=docker&logoColor=white)
-![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-010101?logo=socket.io&logoColor=white)
-![REST API](https://img.shields.io/badge/API-REST-009688?logo=api&logoColor=white)
-![JWT](https://img.shields.io/badge/Auth-JWT-000000?logo=jsonwebtokens&logoColor=white)
 ![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)
 
-Lia is a multi-tenant AI voice assistant that helps professionals efficiently manage meetings, client information, and related records through natural conversation. Each organization connects Lia to their own data system (CRM or database), so customer data stays in their infrastructure.
+## Table of Contents
+------------------
+- [Project Demo Video](#project-demo-video) • [🚀 Project Overview](#-project-overview) • [📥 Setup Guide](#setup-guide) • [📖 How to Use](#-how-to-use) • [💡 Optimizations](#-optimizations) • [License](#license)
 
+## Project Demo Video
+------------------------------
+<video src="assets/Lia.mp4" controls muted playsinline></video>
 
-## Architecture Overview
+## 🚀 Project Overview
 
-### Multi-Tenant Design
+Lia is a multi-tenant AI assistant designed for organizations that need a voice-first workflow to manage meetings, notes, and customer records.
 
+### What it is
+
+- A backend + frontend platform where users can speak naturally to an AI assistant.
+- A multi-connector system that can route data operations to external databases and CRMs.
+- A tenant-isolated architecture where each organization uses its own connector configuration and data source.
+
+### Why it is useful
+
+- Reduces manual meeting documentation.
+- Improves information retrieval speed during and after meetings.
+- Lets teams work with the tools they already use (PostgreSQL, MySQL, HubSpot, Salesforce, Dynamics).
+
+### What problem it solves
+
+- Scattered meeting notes and inconsistent follow-up.
+- Slow data lookup across CRM/database systems.
+- High operational friction when switching between communication and data-entry tools.
+
+### Who it is built for
+
+- Sales teams handling frequent client calls.
+- Operations teams tracking meeting outcomes.
+- Multi-tenant SaaS deployments where every organization must keep data in its own infrastructure.
+
+### Architecture (high-level)
+
+```text
+User (Organization A)
+   ↓
+Lia Voice Agent
+   ↓
+DataManager (tenant-aware router)
+   ↓
+Connector Driver (PostgreSQL/MySQL/HubSpot/Salesforce/Dynamics)
+   ↓
+Organization-owned data system
 ```
-User (from Organization A)
-    ↓
-Lia Agent (processes voice)
-    ↓
-DataManager (routes based on org config)
-    ↓
-Connector Driver (PostgreSQL, HubSpot, Salesforce, etc.)
-    ↓
-Organization's Data System (their own database or CRM)
-```
 
-**Key principle:** Each organization stores their data in their own system. Lia is the orchestrator, not the data storage layer.
+Key principle: Lia orchestrates workflows and routing, while tenant data remains in tenant-owned systems.
 
-### Supported Connectors
+### Supported connectors
 
 | Connector | Type | Configuration |
-|-----------|------|---|
-| **PostgreSQL** | External Database | `{host, port, db_name, user, password}` |
-| **MySQL** | External Database | `{host, port, db_name, user, password}` |
-| **HubSpot** | CRM | `{api_key}` |
-| **Salesforce** | CRM | `{client_id, client_secret, username, password}` |
-| **Dynamics 365** | CRM | `{tenant_id, client_id, client_secret` |
+|-----------|------|---------------|
+| PostgreSQL | External Database | `{host, port, db_name, user, password}` |
+| MySQL | External Database | `{host, port, db_name, user, password}` |
+| HubSpot | CRM | `{api_key}` |
+| Salesforce | CRM | `{client_id, client_secret, username, password}` |
+| Dynamics 365 | CRM | `{tenant_id, client_id, client_secret}` |
 
+## 📥 Setup Guide
 
-## Setup Guide
+### How to install
 
-### Prerequisites
+#### Prerequisites
 
-- Docker & Docker Compose
-- LiveKit account (for voice functionality)
-- OpenAI API key (for LLM)
+- Docker and Docker Compose
+- OpenAI API key
+- LiveKit credentials (if voice features are enabled)
 
-### Quick Start with Docker
+#### Option A: Docker setup (recommended)
 
-1. **Clone and navigate to project:**
-   ```bash
-   cd LIA_FOR_ALL
-   ```
+1. Clone the repository and go to the root folder.
+2. Create your environment file:
 
-2. **Set up environment variables:**
-   ```bash
-   cp .env.docker .env
-   ```
-   Then edit `.env` with your credentials:
-   ```bash
-   # JWT authentication
-   JWT_SECRET_KEY=your_secret_key_change_this
-   
-   # LiveKit (for voice)
-   LIVEKIT_URL=ws://localhost:7880
-   LIVEKIT_API_KEY=your_livekit_api_key
-   LIVEKIT_API_SECRET=your_livekit_api_secret
-   
-   # OpenAI (for LLM)
-   OPENAI_API_KEY=your_openai_api_key
-   ```
+```bash
+cp .env.docker .env
+```
 
-3. **Build and start all services:**
-   ```bash
-   make build
-   make up
-   ```
+3. Open `.env` and configure required values:
 
-4. **Verify services are running:**
-   ```bash
-   make ps
-   ```
+```env
+JWT_SECRET_KEY=your_secret_key_change_this
+LIVEKIT_URL=ws://localhost:7880
+LIVEKIT_API_KEY=your_livekit_api_key
+LIVEKIT_API_SECRET=your_livekit_api_secret
+OPENAI_API_KEY=your_openai_api_key
+```
 
-**Services will be available at:**
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:5000
-- API Docs: http://localhost:5000/api/docs
-- Database: localhost:5432
+4. Build and run all services:
 
-### Manual Setup 
+```bash
+make build
+make up
+```
 
-If you prefer to run services locally without Docker:
+5. Check running services:
 
-**Backend:**
+```bash
+make ps
+```
+
+#### Option B: Local development setup
+
+Backend:
+
 ```bash
 cd backend
 python -m venv myenv
-source myenv/bin/activate  # On Windows: .\myenv\Scripts\activate
+source myenv/bin/activate
 pip install -r requirements.txt
 python server.py
 ```
 
-**Frontend:**
+Frontend:
+
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-## How to use Lia 
+### How to configure
 
-### Admin
+- Configure organization-level connector details in the Admin panel.
+- Select the connector type per organization.
+- Save API/database credentials for each tenant.
+- Verify connection by creating or querying sample records.
 
-**Access the Admin Panel:**
-- Login at `http://localhost:3000` with admin account
-- Navigate to the Administration Panel tab
+Default local URLs:
 
-**Create an Organization:**
-1. Go to **Create Organization** tab
-2. Fill in:
-   - **Organization Name**: e.g., "Acme Corporation"
-   - **Industry**: e.g., "Healthcare", "Finance"
-   - **Connector Type**: Select from dropdown (PostgreSQL, MySQL, HubSpot, Salesforce, Dynamics)
-3. Fill in connector credentials (database details or API keys)
-4. Click **Create Organization**
+- Frontend: `http://localhost:3000`
+- Backend API: `http://localhost:5000`
+- API Docs: `http://localhost:5000/api/docs`
 
-**Manage Users:**
-1. Go to **Manage Users** tab
-2. Click **Edit** to modify user details or **Delete** to remove
-3. Or go to **Create User** tab to add new users
+## 📖 How to Use
 
-**Edit Organization:**
-1. Go to **Organizations** tab
-2. Click **Edit** to modify connector configuration
-3. Click **Save Organization**
+### Admin flow (step-by-step)
 
-### User
+1. Open the frontend at `http://localhost:3000` and log in as admin.
+2. Go to the Administration area.
+3. Create an organization and choose its connector type.
+4. Enter connector credentials and save.
+5. Create users and assign them to the organization.
+6. Test with a first voice meeting to confirm end-to-end sync.
 
-**Login and Access:**
-- Go to `http://localhost:3000`
-- Login with your email and password
+### End-user flow (step-by-step)
 
-**Use Voice Interface:**
-- Speak naturally to Lia about meetings, clients, or information you need
+1. Log in with your user account.
+2. Open the voice interface.
+3. Start a conversation naturally with Lia.
+4. Ask Lia to save meeting notes, retrieve history, or update customer details.
+5. Confirm the data is persisted in your organization's configured system.
 
-**What Lia Can Do:**
-- Save meeting summaries to your organization's system
-- Retrieve meeting history and client information
-- Update records in your connected CRM or database
-- Provide context from your existing data
+### Data flow example
 
-
-## How Data Flows
-
-### Saving a Meeting
-
-```
-1. User speaks to Lia
-2. Lia processes conversation → extracts meeting summary
-3. Agent calls MiddlewareTools.save_meeting()
-4. api_tools.py calls DataManager.save_meeting()
-5. DataManager looks up user's organization
-6. Reads org.connector_type and org.connector_config
-7. Creates appropriate driver (PostgreSQLDriver, HubSpotDriver, etc.)
-8. Driver saves meeting to organization's system
-9. SyncLog entry created for audit
+```text
+Voice input -> Lia processing -> tool call -> DataManager routing -> connector driver -> tenant system
 ```
 
-### Retrieving Meeting History
+## 💡 Optimizations
 
-```
-1. Model asks for meeting history via get_history tool
-2. DataManager determines connector type
-3. Driver queries organization's system
-4. Results returned to Lia for context
-```
+- Add connector health monitoring with per-tenant status dashboards.
+- Introduce retry queues and dead-letter handling for external CRM/API failures.
+- Add tenant-level analytics (usage, latency, success rate, token cost).
+- Expand RBAC and audit logs for enterprise governance.
+- Add end-to-end integration tests per connector to reduce regression risk.
+- Improve onboarding with guided setup validation for new organizations.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
