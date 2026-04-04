@@ -12,11 +12,11 @@
 ![Docker](https://img.shields.io/badge/Container-Docker-2496ED?logo=docker&logoColor=white)
 ![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)
 
-• [📹 Project Demo Video](#project-demo-video) • [🚀 Project Overview](#-project-overview) • [📥 Setup Guide](#setup-guide) • [📖 How to Use](#-how-to-use) • [💡 Optimizations](#-optimizations) • [License](#license)
+• [📹 Project Demo Video](#project-demo-video) • [🚀 Project Overview](#-project-overview) • [📥 Setup Guide](#setup-guide) • [📖 How to Use](#-how-to-use) • [💡 Optimizations](#-optimizations) • [📃 License](#license)
 
 ## 📹 Project Demo Video
 
-<video src="assets/Lia.mp4" controls muted playsinline></video>
+[Watch demo video (MP4)](assets/Lia.mp4)
 
 ------------------------------
 ## 🚀 Project Overview
@@ -182,6 +182,6 @@ Voice input -> Lia processing -> tool call -> DataManager routing -> connector d
 - Add end-to-end integration tests per connector to reduce regression risk.
 - Improve onboarding with guided setup validation for new organizations.
 
-## License
+## 📃 License
 
 This project is licensed under the [MIT License](LICENSE).
