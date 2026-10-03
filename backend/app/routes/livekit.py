@@ -1,30 +1,39 @@
 import os
 import uuid
+from datetime import timedelta
+
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from livekit import api
 
+from ..extensions import db
 from ..models import User
-
+from ..security import server_error
 
 livekit_bp = Blueprint("livekit", __name__)
 
+_MAX_DISPLAY_NAME = 64
+_TOKEN_TTL = timedelta(hours=1)
+
 
 def generate_room_name() -> str:
-    return "room-" + str(uuid.uuid4())[:8]
+    # Full 128-bit random suffix: rooms must not be guessable, since anyone who
+    # knows a room name and holds a valid token for it could join it.
+    return "room-" + uuid.uuid4().hex
 
 
 @livekit_bp.route("/getToken", methods=["GET"])
 @jwt_required()
 def get_token():
     try:
-        user_id = get_jwt_identity()
-        user = User.query.get(user_id)
+        user = db.session.get(User, get_jwt_identity())
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        name = request.args.get("name", user.email or str(user.id))
-        room = request.args.get("room") or generate_room_name()
+        # The room is always chosen by the server; a client-supplied "room" is ignored so
+        # that a user cannot obtain a token for someone else's room.
+        name = (request.args.get("name") or user.email or str(user.id)).strip()[:_MAX_DISPLAY_NAME]
+        room = generate_room_name()
 
         token = (
             api.AccessToken(
@@ -33,6 +42,7 @@ def get_token():
             )
             .with_identity(f"User_{user.id}")
             .with_name(name)
+            .with_ttl(_TOKEN_TTL)
             .with_grants(
                 api.VideoGrants(
                     room_join=True,
@@ -51,4 +61,4 @@ def get_token():
             }
         ), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return server_error(e)

@@ -8,12 +8,17 @@ Ensures:
 4. Email-based identity with UUID-based scoping
 """
 
+import logging
 from functools import wraps
-from flask import jsonify, request
-from flask_jwt_extended import get_jwt_identity
 from typing import Callable, Optional, Tuple
 
-from ..models import User, Organization
+from flask import jsonify, request
+from flask_jwt_extended import get_jwt_identity
+
+from ..models import Organization, User
+from ..security import server_error
+
+logger = logging.getLogger(__name__)
 
 
 def get_authorized_user_and_org(
@@ -22,28 +27,28 @@ def get_authorized_user_and_org(
 ) -> Tuple[Optional[User], Optional[Organization]]:
     """
     Verify and retrieve authorized user and organization.
-    
+
     Args:
         user_id_from_jwt: User ID from JWT token (required)
         org_id_from_request: Organization ID from request (optional, will use user's org if not provided)
-    
+
     Returns:
         Tuple of (User, Organization) if valid, raises ValueError if not
-    
+
     Raises:
         ValueError: If user or org not found, or mismatch detected
     """
     if not user_id_from_jwt:
         raise ValueError("No user_id in JWT token")
-    
+
     user = User.query.get(user_id_from_jwt)
     if not user:
         raise ValueError(f"User {user_id_from_jwt} not found")
-    
+
     # User's organization is the authority
     if not user.org_id:
         raise ValueError(f"User {user.email} is not associated with any organization")
-    
+
     # If org_id provided in request, verify it matches user's org
     if org_id_from_request:
         if str(user.org_id) != str(org_id_from_request):
@@ -51,18 +56,18 @@ def get_authorized_user_and_org(
                 f"User {user.email} (org: {user.org_id}) "
                 f"tried to access org: {org_id_from_request}"
             )
-    
+
     org = user.organization
     if not org:
         raise ValueError(f"Organization {user.org_id} not found")
-    
+
     return user, org
 
 
 def require_auth_user(f: Callable) -> Callable:
     """
     Decorator to enforce authentication and multi-tenant isolation.
-    
+
     Usage:
         @app.route("/api/data")
         @jwt_required()
@@ -70,7 +75,7 @@ def require_auth_user(f: Callable) -> Callable:
         def get_data(authorized_user, authorized_org):
             # authorized_user and authorized_org are automatically injected
             return jsonify({"org": authorized_org.name})
-    
+
     Verifies:
     1. JWT token is valid (via @jwt_required)
     2. User exists and is active
@@ -81,20 +86,20 @@ def require_auth_user(f: Callable) -> Callable:
     def wrapper(*args, **kwargs):
         try:
             user_id = get_jwt_identity()
-            
+
             # Extract org_id from request if provided
             org_id_from_request = (
                 request.view_args.get("org_id") or
                 request.args.get("org_id") or
-                (request.get_json() or {}).get("org_id")
+                (request.get_json(silent=True) or {}).get("org_id")
             )
-            
+
             # Get and verify user and org
             authorized_user, authorized_org = get_authorized_user_and_org(
                 user_id_from_jwt=user_id,
                 org_id_from_request=org_id_from_request
             )
-            
+
             # Inject into function
             return f(
                 *args,
@@ -102,12 +107,13 @@ def require_auth_user(f: Callable) -> Callable:
                 authorized_org=authorized_org,
                 **kwargs
             )
-        
+
         except ValueError as e:
-            return jsonify({"error": str(e)}), 403
+            logger.warning("Authorization denied: %s", e)
+            return jsonify({"error": "Forbidden"}), 403
         except Exception as e:
-            return jsonify({"error": f"Authorization error: {str(e)}"}), 500
-    
+            return server_error(e, "Authorization error")
+
     return wrapper
 
 
@@ -118,14 +124,14 @@ def verify_user_owns_entity(
 ) -> bool:
     """
     Verify a user owns a specific entity.
-    
+
     Always call this before returning any entity data.
-    
+
     Args:
         user_id: LIA user UUID
         entity_type: Type of entity ("patient", "contact", etc.)
         external_entity_id: ID of entity in external CRM
-    
+
     Returns:
         True if user owns entity, False otherwise
     """
@@ -140,11 +146,11 @@ def verify_user_in_organization(
 ) -> bool:
     """
     Verify a user belongs to an organization.
-    
+
     Args:
         user_id: LIA user UUID
         org_id: Organization UUID
-    
+
     Returns:
         True if user is in organization, False otherwise
     """
@@ -159,25 +165,25 @@ def verify_user_by_email(
 ) -> Optional[User]:
     """
     Safe user lookup by email (used in login and provisioning).
-    
+
     Args:
         email: User email address
-    
+
     Returns:
         User object if found, None otherwise
     """
     if not email:
         return None
-    
+
     return User.query.filter_by(email=email.lower().strip()).first()
 
 
 def require_admin(f: Callable) -> Callable:
     """
     Decorator to enforce admin-only access to routes.
-    
+
     Must be used with @jwt_required() decorator.
-    
+
     Usage:
         @app.route("/admin/dashboard")
         @jwt_required()
@@ -185,15 +191,15 @@ def require_admin(f: Callable) -> Callable:
         def admin_dashboard(admin_user):
             # admin_user is automatically injected
             return jsonify({"message": f"Welcome admin {admin_user.email}"})
-    
+
     Verifies:
     1. JWT token is valid
-    2. User exists  
+    2. User exists
     3. User has admin or owner role
-    
+
     Injects:
         admin_user: The authenticated admin User object
-    
+
     Returns:
         403 if not admin, otherwise calls decorated function
     """
@@ -202,16 +208,16 @@ def require_admin(f: Callable) -> Callable:
         user_id = get_jwt_identity()
         if not user_id:
             return jsonify({"error": "Unauthorized - no user ID in token"}), 403
-        
+
         user = User.query.get(user_id)
         if not user:
             return jsonify({"error": "Unauthorized - user not found"}), 403
-        
+
         # Check if user has admin privileges
         if user.role not in ("admin", "owner"):
             return jsonify({"error": "Unauthorized - admin access required"}), 403
-        
+
         # Inject admin_user into function
         return f(*args, admin_user=user, **kwargs)
-    
+
     return wrapper

@@ -1,17 +1,10 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  ActivityIndicator,
-} from 'react-native';
+import { useRef, useState } from 'react';
+import { View, Text, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { api } from '../lib/api';
-import { storage } from '../lib/storage';
+import { api, getErrorMessage } from '../lib/api';
+import { saveSession, homeRouteFor } from '../lib/storage';
+import { validateLogin } from '../lib/validation';
+import { Banner, Button, Field } from '../components/ui';
 import { styles } from './LoginScreen.styles';
 
 export default function LoginScreen({ navigation }) {
@@ -19,27 +12,28 @@ export default function LoginScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
+  const passwordRef = useRef(null);
 
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      setError('Email and password are required.');
-      return;
-    }
-    setLoading(true);
+    if (loading) return;
+    const errors = validateLogin({ email, password });
+    setFieldErrors(errors);
     setError('');
+    if (Object.keys(errors).length > 0) return;
+
+    setLoading(true);
     try {
       const response = await api.post('/login', { email: email.trim(), password });
       if (response.data.access_token && response.data.user) {
-        await storage.setItem('token', response.data.access_token);
-        await storage.setItem('user', JSON.stringify(response.data.user));
         const user = response.data.user;
-        const isAdmin = user.role === 'admin' || user.role === 'owner';
-        navigation.replace(isAdmin ? 'Admin' : 'Voice');
+        await saveSession(response.data.access_token, user);
+        navigation.replace(homeRouteFor(user));
       } else {
         setError('Invalid response from server.');
       }
     } catch (err) {
-      setError(err.response?.data?.error || err.message || 'An error occurred.');
+      setError(getErrorMessage(err, 'Sign in failed. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -47,63 +41,59 @@ export default function LoginScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-        >
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <View style={styles.box}>
-            <Text style={styles.title}>Lia</Text>
+            <Text style={styles.title} accessibilityRole="header">Lia</Text>
             <Text style={styles.subtitle}>Sign in to your account</Text>
 
-            {!!error && (
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            )}
+            <Banner kind="error" message={error} />
 
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              style={styles.input}
+            <Field
+              label="Email"
               value={email}
               onChangeText={setEmail}
+              error={fieldErrors.email}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
+              autoComplete="email"
+              textContentType="username"
+              returnKeyType="next"
+              blurOnSubmit={false}
+              onSubmitEditing={() => passwordRef.current?.focus()}
               placeholder="your@email.com"
-              placeholderTextColor="#555"
+              editable={!loading}
             />
 
-            <Text style={styles.label}>Password</Text>
-            <TextInput
-              style={styles.input}
+            <Field
+              ref={passwordRef}
+              label="Password"
               value={password}
               onChangeText={setPassword}
+              error={fieldErrors.password}
               secureTextEntry
-              placeholder="••••••••"
-              placeholderTextColor="#555"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="current-password"
+              textContentType="password"
+              returnKeyType="go"
+              onSubmitEditing={handleLogin}
+              placeholder="Your password"
+              editable={!loading}
             />
 
-            <TouchableOpacity
-              style={[styles.submitBtn, loading && styles.submitBtnDisabled]}
+            <Button
+              label="Login"
               onPress={handleLogin}
-              disabled={loading}
-              activeOpacity={0.8}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.submitBtnText}>Login</Text>
-              )}
-            </TouchableOpacity>
+              loading={loading}
+              loadingLabel="Signing in"
+              accessibilityHint="Signs in with the email and password above"
+              style={styles.submit}
+            />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
-
-

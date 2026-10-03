@@ -1,15 +1,35 @@
 from __future__ import annotations
 
-from typing import Optional, List, Any, Dict
-from uuid import UUID
-import bcrypt
 import logging
-from sqlalchemy import inspect as sqlalchemy_inspect
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
+import uuid
+from typing import Any, Dict, List, Optional
+from uuid import UUID
 
+import bcrypt
+from sqlalchemy import Uuid
+from sqlalchemy import inspect as sqlalchemy_inspect
+from sqlalchemy.types import TypeDecorator
+
+from .crypto import EncryptedJSON
 from .extensions import db
 
 logger = logging.getLogger(__name__)
+
+
+class GUID(TypeDecorator):
+    """UUID column that accepts ``str`` or ``UUID`` and works on PostgreSQL and SQLite.
+
+    JWT identities and URL parameters arrive as strings; PostgreSQL tolerates that but the
+    generic ``Uuid`` type does not. Invalid strings raise ValueError (mapped to HTTP 400).
+    """
+
+    impl = Uuid(as_uuid=True)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None or isinstance(value, uuid.UUID):
+            return value
+        return uuid.UUID(str(value))
 
 
 def _uuid_server_default():
@@ -21,11 +41,12 @@ class Organization(db.Model):
 
     __tablename__ = "organizations"
 
-    id = db.Column(PG_UUID(as_uuid=True), primary_key=True, server_default=_uuid_server_default())
+    id = db.Column(GUID(), primary_key=True, default=uuid.uuid4, server_default=_uuid_server_default())
     name = db.Column(db.String(255), nullable=False)
     industry = db.Column(db.String(100))
     connector_type = db.Column(db.String(50), nullable=False)
-    connector_config = db.Column(JSONB)
+    # Encrypted at rest when CONNECTOR_ENCRYPTION_KEY is set (see app/crypto.py).
+    connector_config = db.Column(EncryptedJSON)
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
 
@@ -34,8 +55,8 @@ class User(db.Model):
 
     __tablename__ = "users"
 
-    id = db.Column(PG_UUID(as_uuid=True), primary_key=True, server_default=_uuid_server_default())
-    org_id = db.Column(PG_UUID(as_uuid=True), db.ForeignKey("organizations.id", ondelete="CASCADE"))
+    id = db.Column(GUID(), primary_key=True, default=uuid.uuid4, server_default=_uuid_server_default())
+    org_id = db.Column(GUID(), db.ForeignKey("organizations.id", ondelete="CASCADE"))
     email = db.Column(db.String(255), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(50), default="user")
@@ -62,8 +83,8 @@ class SyncLog(db.Model):
 
     __tablename__ = "sync_logs"
 
-    id = db.Column(PG_UUID(as_uuid=True), primary_key=True, server_default=_uuid_server_default())
-    org_id = db.Column(PG_UUID(as_uuid=True), db.ForeignKey("organizations.id", ondelete="CASCADE"))
+    id = db.Column(GUID(), primary_key=True, default=uuid.uuid4, server_default=_uuid_server_default())
+    org_id = db.Column(GUID(), db.ForeignKey("organizations.id", ondelete="CASCADE"))
     status = db.Column(db.String(50))
     target_system = db.Column(db.String(50))
     error_message = db.Column(db.Text)
@@ -77,13 +98,13 @@ class UserEntityOwnership(db.Model):
 
     __tablename__ = "user_entity_ownership"
 
-    id = db.Column(PG_UUID(as_uuid=True), primary_key=True, server_default=_uuid_server_default())
-    user_id = db.Column(PG_UUID(as_uuid=True), db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    org_id = db.Column(PG_UUID(as_uuid=True), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    id = db.Column(GUID(), primary_key=True, default=uuid.uuid4, server_default=_uuid_server_default())
+    user_id = db.Column(GUID(), db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    org_id = db.Column(GUID(), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     entity_type = db.Column(db.String(50), nullable=False)  # e.g., "patient", "contact", "client"
     external_entity_id = db.Column(db.String(255), nullable=False)  # The actual ID from CRM database
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
-    
+
     # Composite unique constraint: same user can't own same entity twice
     __table_args__ = (
         db.UniqueConstraint('user_id', 'entity_type', 'external_entity_id', name='uq_user_entity'),
@@ -99,14 +120,14 @@ class ExternalUserMapping(db.Model):
 
     __tablename__ = "external_user_mapping"
 
-    id = db.Column(PG_UUID(as_uuid=True), primary_key=True, server_default=_uuid_server_default())
-    user_id = db.Column(PG_UUID(as_uuid=True), db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    org_id = db.Column(PG_UUID(as_uuid=True), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    id = db.Column(GUID(), primary_key=True, default=uuid.uuid4, server_default=_uuid_server_default())
+    user_id = db.Column(GUID(), db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    org_id = db.Column(GUID(), db.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     crm_type = db.Column(db.String(50), nullable=False)  # e.g., "salesforce", "hubspot", "dynamics", "postgresql"
     external_user_id = db.Column(db.String(255), nullable=False)  # The actual user ID in that CRM
     external_email = db.Column(db.String(255))  # The email in that CRM system (for verification)
     last_synced_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
-    
+
     # Composite unique: same user can't have two mappings for same CRM
     __table_args__ = (
         db.UniqueConstraint('user_id', 'crm_type', name='uq_user_crm_mapping'),
@@ -265,7 +286,7 @@ class DatabaseDriver:
         org_id=None,
     ) -> List[str]:
         """Get all external entity IDs owned by a user for a given entity type.
-        
+
         SECURITY: Validates table existence before querying (AI-enforced).
         Returns empty list if table doesn't exist or user owns no entities.
         """
@@ -276,7 +297,7 @@ class DatabaseDriver:
                 "Database may not be properly initialized. Returning empty entity list."
             )
             return []  # No data can be retrieved safely
-        
+
         try:
             filter_kwargs = {
                 "user_id": self._uuid_any(user_id),
@@ -301,18 +322,18 @@ class DatabaseDriver:
         external_entity_id: str,
     ) -> bool:
         """Check if a user owns a specific external entity.
-        
+
         SECURITY: Validates table existence before querying (AI-enforced).
         Returns False if table doesn't exist (safe default).
         """
         # IMPORTANT: Validate that user_entity_ownership table exists (multitenant safety)
         if not self.table_exists('user_entity_ownership'):
             logger.warning(
-                f"user_entity_ownership table does not exist. "
+                "user_entity_ownership table does not exist. "
                 "Database may not be properly initialized."
             )
             return False  # Default to deny access if table missing
-        
+
         try:
             ownership = UserEntityOwnership.query.filter_by(
                 user_id=self._uuid_any(user_id),
@@ -337,14 +358,14 @@ class DatabaseDriver:
         external_email: Optional[str] = None,
     ) -> Optional[ExternalUserMapping]:
         """Create a mapping between a LIA user and their external CRM identity.
-        
+
         Args:
             user_id: LIA user's UUID
             org_id: Organization UUID
             crm_type: Type of CRM ("salesforce", "hubspot", "dynamics", "postgresql", etc.)
             external_user_id: The user's ID in that external system
             external_email: The user's email in that external system
-        
+
         Returns:
             ExternalUserMapping object or None if failed
         """
@@ -377,11 +398,11 @@ class DatabaseDriver:
         crm_type: str,
     ) -> Optional[str]:
         """Get the external user ID for a specific CRM system.
-        
+
         Args:
             user_id: LIA user's UUID
             crm_type: Type of CRM ("salesforce", "hubspot", "dynamics", etc.)
-        
+
         Returns:
             The external user ID or None if no mapping exists
         """
@@ -398,11 +419,11 @@ class DatabaseDriver:
         crm_type: str,
     ) -> Optional[ExternalUserMapping]:
         """Get the full external user mapping record.
-        
+
         Args:
             user_id: LIA user's UUID
             crm_type: Type of CRM
-        
+
         Returns:
             Full ExternalUserMapping object or None
         """
@@ -417,7 +438,7 @@ class DatabaseDriver:
         user_id,
     ) -> List[ExternalUserMapping]:
         """Get all external CRM mappings for a user.
-        
+
         Useful for admin dashboards showing which systems the user is connected to.
         """
         self._ensure_external_user_mapping_schema()
@@ -432,15 +453,15 @@ class DatabaseDriver:
         external_user_id: str,
     ) -> Optional[User]:
         """Find a LIA user based on their external CRM ID.
-        
+
         Useful when syncing data from external CRM - you get CRM's user ID
         and need to find the corresponding LIA user.
-        
+
         Args:
             org_id: Organization UUID
             crm_type: Type of CRM
             external_user_id: The user's ID in the external system
-        
+
         Returns:
             User object or None if not found
         """
@@ -460,23 +481,23 @@ class DatabaseDriver:
         entity_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Get entities owned by a user - ADMIN SAFE (checks table existence first).
-        
+
         Args:
             user_id: User UUID
             entity_type: Optional filter by entity type
-            
+
         Returns:
             List of entity ownership records (empty if table missing)
         """
         if not self.table_exists('user_entity_ownership'):
-            logger.warning(f"user_entity_ownership table not found - returning empty list")
+            logger.warning("user_entity_ownership table not found - returning empty list")
             return []
-        
+
         try:
             query = UserEntityOwnership.query.filter_by(user_id=self._uuid_any(user_id))
             if entity_type:
                 query = query.filter_by(entity_type=entity_type)
-            
+
             ownerships = query.all()
             return [
                 {
@@ -499,30 +520,30 @@ class DatabaseDriver:
         external_entity_id: str,
     ) -> bool:
         """Remove entity ownership from user - ADMIN SAFE (checks table existence first).
-        
+
         Args:
             user_id: User UUID
             entity_type: Type of entity
             external_entity_id: External entity ID
-            
+
         Returns:
             True if successfully removed, False otherwise
         """
         if not self.table_exists('user_entity_ownership'):
-            logger.warning(f"user_entity_ownership table not found - cannot remove")
+            logger.warning("user_entity_ownership table not found - cannot remove")
             return False
-        
+
         try:
             ownership = UserEntityOwnership.query.filter_by(
                 user_id=self._uuid_any(user_id),
                 entity_type=entity_type,
                 external_entity_id=str(external_entity_id),
             ).first()
-            
+
             if not ownership:
                 logger.warning(f"Entity ownership not found for user {user_id}")
                 return False
-            
+
             db.session.delete(ownership)
             db.session.commit()
             logger.info(f"Removed {entity_type} entity '{external_entity_id}' from user {user_id}")

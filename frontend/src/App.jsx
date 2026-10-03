@@ -1,73 +1,84 @@
-import { useState, useEffect } from 'react';
-import './App.css';
+import { lazy, Suspense, useState, useEffect, useCallback } from 'react';
 import Login from './components/Login';
-import VoiceInterface from './components/VoiceInterface';
 import ConnectorSettings from './components/ConnectorSettings';
 import Admin from './components/Admin';
 
+// LiveKit is heavy: load it only when a non-admin user reaches the assistant.
+const VoiceInterface = lazy(() => import('./components/VoiceInterface'));
+import { UNAUTHORIZED_EVENT } from './lib/api';
+import { clearSession, getStoredUser, getToken, isAdminRole } from './lib/storage';
+
+const VIEW_TITLES = {
+  login: 'Sign in',
+  admin: 'Administration',
+  voice: 'Assistant',
+  connector: 'Connector settings',
+};
+
+// Admins and owners land on the admin panel, everyone else on the assistant.
+const homeViewFor = (user) => (isAdminRole(user) ? 'admin' : 'voice');
+
+// Restore a previous session once, before the first render, so there is no
+// flash of the login screen for signed-in users.
+function readInitialSession() {
+  const user = getToken() ? getStoredUser() : null;
+  return user ? { user, view: homeViewFor(user) } : { user: null, view: 'login' };
+}
+
 function App() {
-  const [currentView, setCurrentView] = useState('login'); // 'login' | 'voice' | 'connector' | 'admin'
-  const [user, setUser] = useState(null);
+  const [initial] = useState(readInitialSession);
+  const [currentView, setCurrentView] = useState(initial.view); // 'login' | 'voice' | 'connector' | 'admin'
+  const [user, setUser] = useState(initial.user);
+
+  const handleLogout = useCallback(() => {
+    clearSession();
+    setUser(null);
+    setCurrentView('login');
+  }, []);
+
+  // The API helper emits this event when the server answers 401.
+  useEffect(() => {
+    window.addEventListener(UNAUTHORIZED_EVENT, handleLogout);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, handleLogout);
+  }, [handleLogout]);
 
   useEffect(() => {
-    // Check if user is already logged in
-    const token = localStorage.getItem('token');
-    const userData = localStorage.getItem('user');
-
-    if (token && userData) {
-      const parsedUser = JSON.parse(userData);
-      setUser(parsedUser);
-      // Route admin users to admin dashboard, others to voice interface
-      setCurrentView(parsedUser.role === 'admin' || parsedUser.role === 'owner' ? 'admin' : 'voice');
-    }
-  }, []);
+    document.title = `${VIEW_TITLES[currentView]} - Lia`;
+  }, [currentView]);
 
   const handleLoginSuccess = (userData) => {
     setUser(userData);
-    // Route admin users to admin dashboard, others to voice interface
-    setCurrentView(userData.role === 'admin' || userData.role === 'owner' ? 'admin' : 'voice');
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setUser(null);
-    setCurrentView('login');
-  };
-
-  const handleOpenConnectorSettings = () => {
-    setCurrentView('connector');
-  };
-
-  const handleBackToVoice = () => {
-    setCurrentView('voice');
+    setCurrentView(homeViewFor(userData));
   };
 
   return (
     <div className="app">
-      {currentView === 'login' && (
-        <Login onLoginSuccess={handleLoginSuccess} />
-      )}
+      {currentView === 'login' && <Login onLoginSuccess={handleLoginSuccess} />}
 
-      {currentView === 'admin' && user && (
-        <Admin user={user} onLogout={handleLogout} />
-      )}
+      {currentView === 'admin' && user && <Admin user={user} onLogout={handleLogout} />}
 
       {currentView === 'voice' && user && (
-        <VoiceInterface
-          user={user}
-          onLogout={handleLogout}
-          onOpenConnectorSettings={handleOpenConnectorSettings}
-        />
+        <Suspense
+          fallback={
+            <div className="state-box" role="status">
+              <div className="spinner" aria-hidden="true" />
+              <p>Loading assistant...</p>
+            </div>
+          }
+        >
+          <VoiceInterface
+            user={user}
+            onLogout={handleLogout}
+            onOpenConnectorSettings={() => setCurrentView('connector')}
+          />
+        </Suspense>
       )}
 
       {currentView === 'connector' && user && (
-        <ConnectorSettings user={user} onBack={handleBackToVoice} />
+        <ConnectorSettings user={user} onBack={() => setCurrentView('voice')} />
       )}
     </div>
   );
 }
 
 export default App;
-
-

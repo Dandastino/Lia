@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -77,7 +77,7 @@ class HubSpotDriver(BaseDriver):
         kwargs.setdefault("verify", self._verify_ssl)
         kwargs.setdefault("timeout", self._timeout)
         try:
-            response = requests.request(method.upper(), url, **kwargs)
+            response = requests.request(method.upper(), url, **kwargs)  # noqa: S113 - timeout is set through kwargs.setdefault above
             response.raise_for_status()
             return response
         except requests.exceptions.HTTPError as err:
@@ -96,7 +96,7 @@ class HubSpotDriver(BaseDriver):
 
     @staticmethod
     def _ts_now() -> str:
-        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
     @staticmethod
     def _ts_coerce(value: Any) -> Optional[str]:
@@ -104,13 +104,13 @@ class HubSpotDriver(BaseDriver):
         if value is None:
             return None
         if isinstance(value, datetime):
-            dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-            return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            dt = value if value.tzinfo else value.replace(tzinfo=UTC)
+            return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
         if isinstance(value, (int, float)):
             ts = float(value)
             if ts > 1e10:   # milliseconds -> seconds
                 ts /= 1000.0
-            return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+            return datetime.fromtimestamp(ts, tz=UTC).isoformat().replace("+00:00", "Z")
         if isinstance(value, str):
             s = value.strip()
             if not s:
@@ -120,8 +120,8 @@ class HubSpotDriver(BaseDriver):
             try:
                 parsed = datetime.fromisoformat(s.replace("Z", "+00:00"))
                 if not parsed.tzinfo:
-                    parsed = parsed.replace(tzinfo=timezone.utc)
-                return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+                    parsed = parsed.replace(tzinfo=UTC)
+                return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
             except ValueError:
                 return None
         return None
@@ -155,7 +155,7 @@ class HubSpotDriver(BaseDriver):
         return _OBJECT_ALIASES.get(cleaned, cleaned)
 
     # -------------------------------------------------------------------------
-    # Contact & Company lookup 
+    # Contact & Company lookup
     # -------------------------------------------------------------------------
 
     def find_contact(
@@ -172,6 +172,8 @@ class HubSpotDriver(BaseDriver):
             search_filters = [{"propertyName": "email", "operator": "EQ", "value": email.strip()}]
         else:
             parts = (name or "").strip().split(None, 1)
+            if not parts:
+                return None
             firstname, lastname = parts[0], parts[1] if len(parts) > 1 else ""
             logger.info("[HubSpot] Searching contact by name: %s", name)
             search_filters = [{"propertyName": "firstname", "operator": "EQ", "value": firstname}]
@@ -316,7 +318,7 @@ class HubSpotDriver(BaseDriver):
             return None
 
     # -------------------------------------------------------------------------
-    # Association (CRM v4) 
+    # Association (CRM v4)
     # -------------------------------------------------------------------------
 
     def _associate(self, from_type: str, from_id: str, to_type: str, to_id: str) -> bool:
@@ -370,7 +372,7 @@ class HubSpotDriver(BaseDriver):
             return []
 
     # -------------------------------------------------------------------------
-    # Smart association resolver 
+    # Smart association resolver
     # -------------------------------------------------------------------------
 
     def _resolve_and_associate(
@@ -779,7 +781,7 @@ class HubSpotDriver(BaseDriver):
                 resolved = CRMEntityMapper().resolve_doctor_in_crm(user_id=user_id, crm_type="hubspot")
                 if resolved:
                     return str(resolved).strip()
-            except Exception:
+            except Exception:  # noqa: S110 - best-effort, failure is expected and handled by the caller
                 pass
         return None
 
@@ -791,10 +793,10 @@ class HubSpotDriver(BaseDriver):
     def _extract_enum_values_from_error_response(error_text: str) -> Optional[List[str]]:
         """
         Extract valid enum values from HubSpot HTTP 400 error message.
-        
+
         HubSpot returns something like:
         "Valid options are: pipelineId=default : [appointmentscheduled, qualifiedtobuy, ...]"
-        
+
         Returns list of valid values, or None if no enum error detected.
         """
         # Look for pattern: "Valid options are: ... : [value1, value2, ...]"
@@ -802,7 +804,7 @@ class HubSpotDriver(BaseDriver):
         match = re.search(r'Valid options are:.*?:\s*\[([^\]]+)\]', error_text, re.IGNORECASE)
         if not match:
             return None
-        
+
         enum_str = match.group(1)
         # Split by comma and quote marks, clean up
         # Handle both: "value1, value2" and "'value1', 'value2'"
@@ -813,33 +815,33 @@ class HubSpotDriver(BaseDriver):
             val = match_tuple[0] or match_tuple[1] or match_tuple[2]
             if val.strip():
                 enum_values.append(val.strip().lower())
-        
+
         return enum_values if enum_values else None
 
     @staticmethod
     def _find_closest_enum_match(attempted_value: str, valid_options: List[str], cutoff: float = 0.6) -> Optional[str]:
         """
         Use string similarity to find the closest valid enum value.
-        
+
         Example: attempted_value="scheduled" + valid_options=["appointmentscheduled", "closedwon"]
         Returns: "appointmentscheduled" (best match above cutoff)
         """
         from difflib import SequenceMatcher
-        
+
         attempted = str(attempted_value).strip().lower()
         if not attempted or not valid_options:
             return None
-        
+
         best_match = None
         best_ratio = cutoff
-        
+
         for option in valid_options:
             option_lower = str(option).strip().lower()
             ratio = SequenceMatcher(None, attempted, option_lower).ratio()
             if ratio > best_ratio:
                 best_ratio = ratio
                 best_match = option_lower
-        
+
         return best_match
 
     def _create_object(self, obj_type: str, properties: Dict[str, Any]) -> Dict[str, Any]:
@@ -878,10 +880,10 @@ class HubSpotDriver(BaseDriver):
     def _extract_enum_values_from_properties(properties: List[Dict[str, Any]]) -> Dict[str, List[str]]:
         """
         Extract all enum values from a list of HubSpot property definitions.
-        
+
         HubSpot returns properties with type="enumeration" and enumValues list:
         [{"label": "Appointment Scheduled", "value": "appointmentscheduled"}, ...]
-        
+
         Returns:
             {"dealstage": ["appointmentscheduled", "qualifiedtobuy", ...], ...}
         """
@@ -932,7 +934,7 @@ class HubSpotDriver(BaseDriver):
             iso = txt.replace("Z", "+00:00")
             dt = datetime.fromisoformat(iso)
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
             return int(dt.timestamp() * 1000)
         except Exception:
             return None
@@ -944,11 +946,11 @@ class HubSpotDriver(BaseDriver):
     ) -> Dict[str, Any]:
         """
         Normalize property types to match HubSpot API requirements.
-        
+
         - hubspot_owner_id: string → integer
         - amount: string/float → float
         - date/datetime fields: ISO/numeric → epoch milliseconds (long)
-        
+
         Returns normalized properties dict.
         """
         normalized = dict(properties)
@@ -957,7 +959,7 @@ class HubSpotDriver(BaseDriver):
             for k, v in (column_types or {}).items()
             if isinstance(k, str) and isinstance(v, str) and str(v).strip()
         }
-        
+
         # Owner ID must be integer for HubSpot
         if "hubspot_owner_id" in normalized:
             try:
@@ -971,7 +973,7 @@ class HubSpotDriver(BaseDriver):
                     "[HubSpot] Failed to convert hubspot_owner_id to integer: %s (keeping original)",
                     e
                 )
-        
+
         # Amount should be numeric (float)
         if "amount" in normalized:
             try:
@@ -997,7 +999,7 @@ class HubSpotDriver(BaseDriver):
                     prop_name,
                     prop_type,
                 )
-        
+
         return normalized
 
     @staticmethod
@@ -1117,7 +1119,7 @@ class HubSpotDriver(BaseDriver):
             resp = getattr(err, "response", None)
             detail = (
                 f"HTTP {resp.status_code}: {(resp.text or '').strip()[:400]}"
-                if resp else str(err)
+                if resp is not None else str(err)  # a Response is falsy for 4xx/5xx, so test identity
             )
             raise Exception(f"Failed to save meeting to HubSpot: {detail}") from err
 
@@ -1186,9 +1188,9 @@ class HubSpotDriver(BaseDriver):
         """
         Introspect HubSpot schema: custom objects from /crm/v3/schemas plus
         all 12 standard objects. Also extract enum values for all fields.
-        
+
         Returns:
-            {"tables": [{"name": "deals", "columns": [...], "column_types": {...}, 
+            {"tables": [{"name": "deals", "columns": [...], "column_types": {...},
                          "enum_values": {"dealstage": [...], ...}}, ...]}
         """
         try:
@@ -1206,7 +1208,7 @@ class HubSpotDriver(BaseDriver):
                 if enum_vals:
                     table_entry["enum_values"] = enum_vals
                 tables.append(table_entry)
-            
+
             standard_objects = [
                 "contacts", "companies", "deals", "tickets", "calls",
                 "emails", "meetings", "notes", "tasks", "products", "line_items", "quotes",
@@ -1227,7 +1229,7 @@ class HubSpotDriver(BaseDriver):
                     if enum_vals:
                         table_entry["enum_values"] = enum_vals
                     tables.append(table_entry)
-                except Exception:
+                except Exception:  # noqa: S112 - best-effort, failure is expected and handled by the caller
                     continue     # best-effort; keep partial results
             logger.info("[HubSpot] Schema introspected: %d objects", len(tables))
             return {"tables": tables}
@@ -1263,12 +1265,12 @@ class HubSpotDriver(BaseDriver):
             if resp is not None and resp.status_code == 400:
                 error_text = resp.text or ""
                 logger.warning("[HubSpot] HTTP 400 during create_entity: %s", error_text[:300])
-                
+
                 # Try to extract valid enum values and do fuzzy matching
                 valid_enums = self._extract_enum_values_from_error_response(error_text)
                 if valid_enums:
                     logger.info("[HubSpot] Detected enum validation error. Valid options: %s", valid_enums)
-                    
+
                     # Try to fuzzy-match props values against valid enums
                     props_modified = False
                     for prop_name, prop_value in list(props.items()):
@@ -1281,14 +1283,14 @@ class HubSpotDriver(BaseDriver):
                                 )
                                 props[prop_name] = best_match
                                 props_modified = True
-                    
+
                     if props_modified:
                         logger.info("[HubSpot] Retrying create_entity with corrected enum values")
                         try:
                             result = self._create_object(obj_type, props)
                         except Exception as retry_err:
                             logger.error("[HubSpot] Retry failed: %s", retry_err)
-                            raise err  # Raise original error if retry fails
+                            raise err from retry_err
                     else:
                         logger.warning("[HubSpot] Enum validation error detected but no props could be fuzzy-matched")
                         raise err
@@ -1297,7 +1299,7 @@ class HubSpotDriver(BaseDriver):
                     raise err
             else:
                 raise
-        
+
         obj_id = result["id"]
         logger.info("[HubSpot] Object created -> %s/%s", obj_type, obj_id)
 

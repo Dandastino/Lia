@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
 
-from ..schema.query_builder import DynamicQueryBuilder
+from ..schema.query_builder import DynamicQueryBuilder, is_safe_identifier
 
 
 def get_entity_mapping(config: Dict[str, Any], entity_type: str) -> Dict[str, Any]:
@@ -30,9 +30,14 @@ def apply_owner_scope_to_params(
 ) -> bool:
     """Inject owner FK into insert params when available.
 
+    The owner scope is authoritative and overrides any caller-supplied value, so a
+    record can only be created inside the requesting user's own scope.
+
     Returns True if owner scope was applied.
     """
-    if owner_col and owner_id and owner_col not in params:
+    if owner_col and owner_id:
+        if not is_safe_identifier(owner_col):
+            raise ValueError("Unsafe owner column name")
         params[owner_col] = owner_id
         return True
     return False
@@ -46,6 +51,8 @@ def add_owner_constraint_to_sql(
     """Append owner constraint to update/delete SQL statements."""
     if not owner_col or not owner_id:
         return sql, {}
+    if not is_safe_identifier(owner_col):
+        raise ValueError("Unsafe owner column name")
 
     if " RETURNING *" in sql:
         return sql.replace(" RETURNING *", f" AND {owner_col} = :__owner_id RETURNING *"), {"__owner_id": owner_id}
@@ -298,7 +305,7 @@ def resolve_foreign_key_values(
 
         try:
             ref_columns_meta = inspector.get_columns(referred_table)
-        except Exception:
+        except Exception:  # noqa: S112 - best-effort, failure is expected and handled by the caller
             continue
 
         ref_columns = [c.get("name") for c in ref_columns_meta if isinstance(c, dict) and c.get("name")]

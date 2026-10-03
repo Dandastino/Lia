@@ -1,5 +1,5 @@
 # Build stage
-FROM node:18-alpine as builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -8,7 +8,7 @@ ARG VITE_API_URL=http://backend:5000
 
 COPY frontend/package*.json .
 
-RUN npm install --legacy-peer-deps
+RUN npm ci
 
 COPY frontend/ .
 
@@ -16,7 +16,7 @@ COPY frontend/ .
 RUN VITE_API_URL=${VITE_API_URL} npm run build
 
 # Production stage
-FROM node:18-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 

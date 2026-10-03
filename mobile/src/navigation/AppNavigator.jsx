@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { storage } from '../lib/storage';
+import { getStoredUser, getToken, homeRouteFor } from '../lib/storage';
+import { onUnauthorized } from '../lib/api';
+import { colors } from '../theme';
+import { navigationRef } from './navigationRef';
 import LoginScreen from '../screens/LoginScreen';
 import VoiceScreen from '../screens/VoiceScreen';
 import AdminScreen from '../screens/AdminScreen';
@@ -13,37 +16,40 @@ export default function AppNavigator() {
   const [initialRoute, setInitialRoute] = useState(null);
 
   useEffect(() => {
+    let cancelled = false;
     const checkAuth = async () => {
-      try {
-        const token = await storage.getItem('token');
-        const userStr = await storage.getItem('user');
-        if (token && userStr) {
-          const user = JSON.parse(userStr);
-          const isAdmin = user.role === 'admin' || user.role === 'owner';
-          setInitialRoute(isAdmin ? 'Admin' : 'Voice');
-        } else {
-          setInitialRoute('Login');
-        }
-      } catch {
-        setInitialRoute('Login');
-      }
+      const token = await getToken();
+      const user = token ? await getStoredUser() : null;
+      if (!cancelled) setInitialRoute(user ? homeRouteFor(user) : 'Login');
     };
     checkAuth();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  // An expired/invalid session (HTTP 401) clears storage in lib/api; send the
+  // user back to Login and drop the navigation history.
+  useEffect(
+    () =>
+      onUnauthorized(() => {
+        if (navigationRef.isReady()) {
+          navigationRef.reset({ index: 0, routes: [{ name: 'Login' }] });
+        }
+      }),
+    [],
+  );
 
   if (!initialRoute) {
     return (
-      <View style={styles.loading}>
-        <ActivityIndicator size="large" color="#6c63ff" />
+      <View style={styles.loading} accessibilityLabel="Loading" accessibilityLiveRegion="polite">
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
-    <Stack.Navigator
-      initialRouteName={initialRoute}
-      screenOptions={{ headerShown: false }}
-    >
+    <Stack.Navigator initialRouteName={initialRoute} screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Voice" component={VoiceScreen} />
       <Stack.Screen name="Admin" component={AdminScreen} />
@@ -55,7 +61,7 @@ export default function AppNavigator() {
 const styles = StyleSheet.create({
   loading: {
     flex: 1,
-    backgroundColor: '#0f0f1a',
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },

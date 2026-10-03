@@ -1,13 +1,13 @@
 from flask import Flask
 
+from .admin import admin_bp
 from .auth import auth_bp
+from .entities import entities_bp
 from .health import health_bp
 from .livekit import livekit_bp
 from .meetings import meetings_bp
 from .organizations import organizations_bp
 from .root import root_bp
-from .admin import admin_bp
-from .entities import entities_bp
 
 
 def register_blueprints(app: Flask) -> None:

@@ -1,0 +1,10 @@
+*                                   @Dandastino
+
+# Security-sensitive paths
+/backend/app/security.py            @Dandastino
+/backend/app/crypto.py              @Dandastino
+/backend/app/tools/authorization.py @Dandastino
+/.github/                           @Dandastino
+/docker-compose*.yml                @Dandastino
+/nginx.prod.conf                    @Dandastino
+/init_db.sql                        @Dandastino

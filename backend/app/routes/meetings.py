@@ -1,9 +1,9 @@
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import get_jwt_identity, jwt_required
+from flask_jwt_extended import jwt_required
 
+from ..security import parse_int_arg, server_error
 from ..services.data_manager import DataManager
 from ..tools.authorization import require_auth_user
-
 
 meetings_bp = Blueprint("meetings", __name__)
 
@@ -14,13 +14,13 @@ meetings_bp = Blueprint("meetings", __name__)
 def list_meetings(authorized_user, authorized_org):
     """
     Get meeting history for the authenticated user.
-    
+
     Returns only meetings created by or assigned to this user.
     Data is automatically filtered by user ownership and organization.
     """
     try:
         user_id = str(authorized_user.id)
-        limit = int(request.args.get("limit", 20))
+        limit = parse_int_arg(request.args.get("limit"), default=20, minimum=1, maximum=50)
 
         dm = DataManager.from_user_id(user_id)
         meetings = dm.get_meeting_history(
@@ -33,7 +33,7 @@ def list_meetings(authorized_user, authorized_org):
             "user_email": authorized_user.email,
         }), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return server_error(e)
 
 
 @meetings_bp.route("/meetings", methods=["POST"])
@@ -42,7 +42,7 @@ def list_meetings(authorized_user, authorized_org):
 def create_meeting(authorized_user, authorized_org):
     """
     Create a new meeting for the authenticated user.
-    
+
     Request body:
     {
         "title": "Meeting title",
@@ -68,11 +68,11 @@ def create_meeting(authorized_user, authorized_org):
 
         dm = DataManager.from_user_id(user_id)
         meeting = dm.save_meeting(user_id=user_id, payload=payload)
-        
+
         return jsonify({
             "message": "Meeting created successfully",
             "meeting": meeting,
             "org": authorized_org.name,
         }), 201
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return server_error(e)

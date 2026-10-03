@@ -8,8 +8,9 @@ This module helps synchronize doctor/user identities across multiple systems:
 The mapper maintains bidirectional lookups to handle data isolation properly.
 """
 
-from typing import Optional, Dict, List
-from ..models import db, User, DatabaseDriver
+from typing import Dict, Optional
+
+from ..models import DatabaseDriver, User
 
 
 class CRMEntityMapper:
@@ -28,14 +29,14 @@ class CRMEntityMapper:
     ) -> bool:
         """
         Register a doctor in LIA with their CRM identity.
-                
+
         Args:
             user_id: Doctor's LIA UUID
             org_id: Organization UUID
             crm_type: Name of CRM system (salesforce, hubspot, dynamics, postgresql, etc.)
             external_user_id: Doctor's ID in that CRM system
             external_email: Doctor's email in that CRM (optional)
-        
+
         Returns:
             True if successful, False otherwise
         """
@@ -55,11 +56,11 @@ class CRMEntityMapper:
     ) -> Optional[str]:
         """
         Given a LIA user, find their ID in a specific CRM system.
-                
+
         Args:
             user_id: LIA user UUID
             crm_type: CRM system name
-        
+
         Returns:
             The external user ID, or None if no mapping exists
         """
@@ -76,12 +77,12 @@ class CRMEntityMapper:
     ) -> Optional[User]:
         """
         Given a CRM user ID, find their LIA user record. Useful when processing webhooks or syncing data from external CRM.
-                
+
         Args:
             org_id: Organization UUID
             crm_type: CRM system name
             external_user_id: User's ID in external CRM
-        
+
         Returns:
             User object, or None if not found
         """
@@ -97,10 +98,10 @@ class CRMEntityMapper:
     ) -> Dict[str, str]:
         """
         Get all CRM identities for a doctor (multi-CRM support).
-                
+
         Args:
             user_id: LIA user UUID
-        
+
         Returns:
             Dictionary mapping CRM names to external user IDs
         """
@@ -117,11 +118,11 @@ class CRMEntityMapper:
     ) -> bool:
         """
         Check if a CRM mapping exists for a user.
-        
+
         Args:
             user_id: LIA user UUID
             crm_type: CRM system name
-        
+
         Returns:
             True if mapping exists, False otherwise
         """

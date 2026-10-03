@@ -1,16 +1,20 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-from datetime import datetime
-from contextlib import contextmanager
 import logging
 import re
-from sqlalchemy import create_engine, Column, String, Text, DateTime, text, inspect
+import uuid
+from contextlib import contextmanager
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import Column, DateTime, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
 from sqlalchemy.types import JSON
-import uuid
 
+from ..schema.inspector import BaseSQLSchemaInspector
+from ..schema.query_builder import DynamicQueryBuilder
+from ..utils import MeetingFormatter
 from .base import BaseDriver
 from .sql_driver_common import (
     add_owner_constraint_to_sql,
@@ -23,9 +27,6 @@ from .sql_driver_common import (
     resolve_required_columns,
     split_limit_and_query_filters,
 )
-from ..schema.inspector import BaseSQLSchemaInspector
-from ..schema.query_builder import DynamicQueryBuilder
-from ..utils import MeetingFormatter
 
 logger = logging.getLogger("mysql_driver")
 
@@ -68,7 +69,7 @@ class MySQLDriver(BaseDriver):
         row = result.fetchone()
         if not row:
             return None
-        return dict(row._mapping) if hasattr(row, "_mapping") else dict(zip(result.keys(), row))
+        return dict(row._mapping) if hasattr(row, "_mapping") else dict(zip(result.keys(), row, strict=False))
 
     def __init__(self, connector_config: Optional[Dict[str, Any]] = None):
         super().__init__(connector_config)
@@ -82,14 +83,14 @@ class MySQLDriver(BaseDriver):
             raise ValueError("MySQL credentials (host, database, user, password) are required")
 
         db_uri = f"mysql+pymysql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
-        
+
         # SSL configuration - try to use SSL but allow fallback if not available
         ssl_config = {}
         if self.config.get("ssl", True):  # Enable SSL by default
             ssl_mode = self.config.get("ssl_mode", "PREFERRED")  # PREFERRED, REQUIRED, or DISABLED
             if ssl_mode != "DISABLED":
                 ssl_config["ssl"] = {"ssl_mode": ssl_mode}
-        
+
         self.engine = create_engine(
             db_uri,
             poolclass=QueuePool,
@@ -141,7 +142,7 @@ class MySQLDriver(BaseDriver):
                     source="external_mysql",
                 )
         except Exception as e:
-            raise Exception(f"Failed to save meeting to external MySQL: {str(e)}")
+            raise Exception(f"Failed to save meeting to external MySQL: {str(e)}") from e
 
     def get_meeting_history(
         self,
@@ -178,7 +179,7 @@ class MySQLDriver(BaseDriver):
                     for m in meetings
                 ]
         except Exception as e:
-            raise Exception(f"Failed to retrieve meeting history from external MySQL: {str(e)}")
+            raise Exception(f"Failed to retrieve meeting history from external MySQL: {str(e)}") from e
 
     async def get_schema_info(self) -> Dict[str, Any]:
         try:
@@ -193,7 +194,7 @@ class MySQLDriver(BaseDriver):
     async def create_entity(self, entity_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         try:
             mapping = get_entity_mapping(self.config, entity_type)
-            
+
             builder = DynamicQueryBuilder(mapping)
             sql, params = builder.build_insert(payload)
             sql = sql.replace(" RETURNING *", "")
@@ -235,7 +236,13 @@ class MySQLDriver(BaseDriver):
                     f"Mapped aliases: {alias_hints}. "
                     "Ask the user for the missing values, then retry create."
                 )
-            
+
+            # Rebuild the INSERT: the owner stamp and resolved foreign keys were added to
+            # params after the statement was first built (PostgreSQL does the same).
+            columns_str = ", ".join(params.keys())
+            placeholders = ", ".join([f":{k}" for k in params])
+            sql = f"INSERT INTO {table_name} ({columns_str}) VALUES ({placeholders})"
+
             with self.get_session() as session:
                 result = session.execute(text(sql), params)
                 inserted_id = params.get(builder.id_column)
@@ -256,16 +263,20 @@ class MySQLDriver(BaseDriver):
     async def read_entities(self, entity_type: str, user_id: Optional[str] = None, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         try:
             mapping = get_entity_mapping(self.config, entity_type)
-            
+
             builder = DynamicQueryBuilder(mapping)
-            
+
             owner_col, owner_id = get_owner_scope(self)
             limit, query_filters = split_limit_and_query_filters(filters, user_id, builder, owner_col, owner_id)
-            sql, params = builder.build_select(filters=query_filters if query_filters else None, limit=limit)
-            
+            sql, params = builder.build_select(
+                filters=query_filters if query_filters else None,
+                limit=limit,
+                trusted_columns=[owner_col] if owner_col else [],
+            )
+
             with self.get_session() as session:
                 result = session.execute(text(sql), params)
-                rows = [dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(result.keys(), row)) for row in result.fetchall()]
+                rows = [dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(result.keys(), row, strict=False)) for row in result.fetchall()]
                 return [builder.normalize_row(row) for row in rows]
         except Exception as e:
             logger.error(f"Failed to read {entity_type}: {e}")
@@ -274,7 +285,7 @@ class MySQLDriver(BaseDriver):
     async def update_entity(self, entity_type: str, entity_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         try:
             mapping = get_entity_mapping(self.config, entity_type)
-            
+
             builder = DynamicQueryBuilder(mapping)
             sql, params = builder.build_update(entity_id, updates)
             sql = sql.replace(" RETURNING *", "")
@@ -282,7 +293,7 @@ class MySQLDriver(BaseDriver):
             owner_col, owner_id = get_owner_scope(self)
             sql, owner_params = add_owner_constraint_to_sql(sql, owner_col, owner_id)
             params.update(owner_params)
-            
+
             with self.get_session() as session:
                 result = session.execute(text(sql), params)
                 if result.rowcount <= 0:
@@ -299,14 +310,14 @@ class MySQLDriver(BaseDriver):
     async def delete_entity(self, entity_type: str, entity_id: str) -> bool:
         try:
             mapping = get_entity_mapping(self.config, entity_type)
-            
+
             builder = DynamicQueryBuilder(mapping)
             sql, params = builder.build_delete(entity_id)
 
             owner_col, owner_id = get_owner_scope(self)
             sql, owner_params = add_owner_constraint_to_sql(sql, owner_col, owner_id)
             params.update(owner_params)
-            
+
             with self.get_session() as session:
                 result = session.execute(text(sql), params)
                 return result.rowcount > 0

@@ -1,15 +1,19 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-from datetime import datetime
-from contextlib import contextmanager
 import logging
-from sqlalchemy import create_engine, Column, String, Text, DateTime, inspect, text
+import uuid
+from contextlib import contextmanager
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import Column, DateTime, String, Text, create_engine, inspect, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
-from sqlalchemy.dialects.postgresql import UUID as JSONB
-import uuid
 
+from ..schema.inspector import BaseSQLSchemaInspector
+from ..schema.query_builder import DynamicQueryBuilder
+from ..utils import MeetingFormatter
 from .base import BaseDriver
 from .sql_driver_common import (
     add_owner_constraint_to_sql,
@@ -22,9 +26,6 @@ from .sql_driver_common import (
     resolve_required_columns,
     split_limit_and_query_filters,
 )
-from ..schema.inspector import BaseSQLSchemaInspector
-from ..schema.query_builder import DynamicQueryBuilder
-from ..utils import MeetingFormatter
 
 logger = logging.getLogger("postgresql_driver")
 
@@ -63,7 +64,7 @@ class ExternalMeeting(Base):
 
 class PostgreSQLDriver(BaseDriver):
     """External PostgreSQL database connector using SQLAlchemy ORM.
-    
+
     Optimized for concurrent users with connection pooling:
     - Pool size: 20 base connections
     - Max overflow: 10 additional temporary connections
@@ -85,10 +86,10 @@ class PostgreSQLDriver(BaseDriver):
 
         # Build connection URI
         db_uri = f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
-        
+
         # SSL configuration - try to use SSL but allow fallback if not available
         ssl_mode = self.config.get("sslmode", "prefer")  # prefer, require, or disable
-        
+
         # Create engine with connection pooling optimized for concurrent users
         self.engine = create_engine(
             db_uri,
@@ -113,7 +114,7 @@ class PostgreSQLDriver(BaseDriver):
     @contextmanager
     def get_session(self):
         """Context manager for safe session handling.
-        
+
         Ensures session is properly committed/rolled back and closed,
         even if an exception occurs. Prevents connection leaks and ensures
         connections are returned to the pool.
@@ -151,7 +152,7 @@ class PostgreSQLDriver(BaseDriver):
                     source="external_postgresql",
                 )
         except Exception as e:
-            raise Exception(f"Failed to save meeting to external PostgreSQL: {str(e)}")
+            raise Exception(f"Failed to save meeting to external PostgreSQL: {str(e)}") from e
 
     def get_meeting_history(
         self,
@@ -190,7 +191,7 @@ class PostgreSQLDriver(BaseDriver):
                     for m in meetings
                 ]
         except Exception as e:
-            raise Exception(f"Failed to retrieve meeting history from external PostgreSQL: {str(e)}")
+            raise Exception(f"Failed to retrieve meeting history from external PostgreSQL: {str(e)}") from e
 
     # ===== Generic CRUD methods (multi-entity support) =====
 
@@ -213,7 +214,7 @@ class PostgreSQLDriver(BaseDriver):
         """Create an entity using dynamic query builder based on schema mapping."""
         try:
             mapping = get_entity_mapping(self.config, entity_type)
-            
+
             builder = DynamicQueryBuilder(mapping)
             sql, params = builder.build_insert(payload)
             logger.debug("Create %s initial mapped params=%s", entity_type, sorted(list(params.keys())))
@@ -266,15 +267,15 @@ class PostgreSQLDriver(BaseDriver):
             columns_str = ", ".join(params.keys())
             placeholders = ", ".join([f":{k}" for k in params.keys()])
             sql = f"INSERT INTO {table_name} ({columns_str}) VALUES ({placeholders}) RETURNING *"
-            
+
             with self.get_session() as session:
                 result = session.execute(text(sql), params)
                 row = result.fetchone()
-                
+
                 if not row:
                     raise Exception(f"Failed to insert {entity_type}")
-                
-                row_dict = dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(result.keys(), row))
+
+                row_dict = dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(result.keys(), row, strict=False))
                 return builder.normalize_row(row_dict)
         except Exception as e:
             logger.error(f"Failed to create {entity_type}: {e}")
@@ -289,17 +290,21 @@ class PostgreSQLDriver(BaseDriver):
         """Read entities using dynamic queries based on schema mapping."""
         try:
             mapping = get_entity_mapping(self.config, entity_type)
-            
+
             builder = DynamicQueryBuilder(mapping)
-            
+
             owner_col, owner_id = get_owner_scope(self)
             limit, query_filters = split_limit_and_query_filters(filters, user_id, builder, owner_col, owner_id)
-            
-            sql, params = builder.build_select(filters=query_filters if query_filters else None, limit=limit)
-            
+
+            sql, params = builder.build_select(
+                filters=query_filters if query_filters else None,
+                limit=limit,
+                trusted_columns=[owner_col] if owner_col else [],
+            )
+
             with self.get_session() as session:
                 result = session.execute(text(sql), params)
-                rows = [dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(result.keys(), row)) for row in result.fetchall()]
+                rows = [dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(result.keys(), row, strict=False)) for row in result.fetchall()]
                 return [builder.normalize_row(row) for row in rows]
         except Exception as e:
             logger.error(f"Failed to read {entity_type}: {e}")
@@ -314,22 +319,22 @@ class PostgreSQLDriver(BaseDriver):
         """Update an entity using dynamic queries."""
         try:
             mapping = get_entity_mapping(self.config, entity_type)
-            
+
             builder = DynamicQueryBuilder(mapping)
             sql, params = builder.build_update(entity_id, updates)
 
             owner_col, owner_id = get_owner_scope(self)
             sql, owner_params = add_owner_constraint_to_sql(sql, owner_col, owner_id)
             params.update(owner_params)
-            
+
             with self.get_session() as session:
                 result = session.execute(text(sql), params)
                 row = result.fetchone()
-                
+
                 if not row:
                     raise ValueError(f"{entity_type} not found: {entity_id}")
-                
-                row_dict = dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(result.keys(), row))
+
+                row_dict = dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(result.keys(), row, strict=False))
                 return builder.normalize_row(row_dict)
         except Exception as e:
             logger.error(f"Failed to update {entity_type}: {e}")
@@ -343,14 +348,14 @@ class PostgreSQLDriver(BaseDriver):
         """Delete an entity using dynamic queries."""
         try:
             mapping = get_entity_mapping(self.config, entity_type)
-            
+
             builder = DynamicQueryBuilder(mapping)
             sql, params = builder.build_delete(entity_id)
 
             owner_col, owner_id = get_owner_scope(self)
             sql, owner_params = add_owner_constraint_to_sql(sql, owner_col, owner_id)
             params.update(owner_params)
-            
+
             with self.get_session() as session:
                 result = session.execute(text(sql), params)
                 return result.rowcount > 0

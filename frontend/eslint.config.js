@@ -5,7 +5,7 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default [
-  { ignores: ['dist'] },
+  { ignores: ['dist', 'coverage', 'playwright-report', 'test-results'] },
   {
     files: ['**/*.{js,jsx}'],
     languageOptions: {
@@ -34,5 +34,15 @@ export default [
         { allowConstantExport: true },
       ],
     },
+  },
+  {
+    // Test doubles are throwaway components: prop-types add no value there.
+    files: ['**/*.test.{js,jsx}', 'src/test/**'],
+    rules: { 'react/prop-types': 'off' },
+  },
+  {
+    // Node-side config and Playwright files.
+    files: ['playwright.config.js', 'vite.config.js', 'e2e/**/*.js'],
+    languageOptions: { globals: globals.node },
   },
 ]

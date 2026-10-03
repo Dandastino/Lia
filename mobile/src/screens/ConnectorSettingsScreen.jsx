@@ -1,24 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  ActivityIndicator,
-} from 'react-native';
+import { useEffect, useState } from 'react';
+import { KeyboardAvoidingView, Platform, ScrollView, Text, TouchableOpacity, View, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { api } from '../lib/api';
+import { api, getErrorMessage } from '../lib/api';
+import { getStoredUser } from '../lib/storage';
+import {
+  CONNECTOR_LABELS,
+  CONNECTOR_SETTINGS_TEMPLATES,
+  SETTINGS_CONNECTOR_TYPES,
+  stripMaskedFields,
+} from '../lib/connector';
+import { Banner, Button, ChoiceChips } from '../components/ui';
+import ConnectorFields from '../components/ConnectorFields';
+import { colors } from '../theme';
 import { styles } from './ConnectorSettingsScreen.styles';
-import { storage } from '../lib/storage';
 
-const CONNECTOR_OPTIONS = [
-  { value: 'postgresql', label: 'PostgreSQL' },
-  { value: 'mysql', label: 'MySQL' },
-  { value: 'hubspot', label: 'HubSpot' },
-  { value: 'salesforce', label: 'Salesforce' },
-  { value: 'dynamics', label: 'Dynamics 365' },
-];
+const CONNECTOR_OPTIONS = SETTINGS_CONNECTOR_TYPES.map((value) => ({ value, label: CONNECTOR_LABELS[value] }));
 
 const DEFAULT_CONFIGS = {
   postgresql: { host: 'db.example.com', port: 5432, database: 'client_db', user: 'lia_user', password: '' },
@@ -28,52 +24,55 @@ const DEFAULT_CONFIGS = {
   dynamics: { tenant_id: '', client_id: '', client_secret: '', dynamics_url: 'https://yourorg.crm.dynamics.com' },
 };
 
-const CONNECTOR_FIELDS = {
-  postgresql: [
-    { field: 'host', label: 'Host', placeholder: 'db.example.com' },
-    { field: 'port', label: 'Port', placeholder: '5432', keyboardType: 'numeric' },
-    { field: 'database', label: 'Database', placeholder: 'client_db' },
-    { field: 'user', label: 'Username', placeholder: 'lia_user' },
-    { field: 'password', label: 'Password', placeholder: '••••••••', secure: true },
-  ],
-  mysql: [
-    { field: 'host', label: 'Host', placeholder: 'db.example.com' },
-    { field: 'port', label: 'Port', placeholder: '3306', keyboardType: 'numeric' },
-    { field: 'database', label: 'Database', placeholder: 'client_db' },
-    { field: 'user', label: 'Username', placeholder: 'lia_user' },
-    { field: 'password', label: 'Password', placeholder: '••••••••', secure: true },
-  ],
-  hubspot: [
-    { field: 'api_key', label: 'API Key', placeholder: 'Your HubSpot API Key', secure: true },
-  ],
-  salesforce: [
-    { field: 'instance_url', label: 'Instance URL', placeholder: 'https://your-instance.salesforce.com' },
-    { field: 'client_id', label: 'Client ID', placeholder: 'Your Client ID' },
-    { field: 'client_secret', label: 'Client Secret', placeholder: '••••••••', secure: true },
-    { field: 'username', label: 'Username', placeholder: 'user@example.com' },
-    { field: 'password', label: 'Password + Token', placeholder: '••••••••', secure: true },
-  ],
-  dynamics: [
-    { field: 'tenant_id', label: 'Tenant ID', placeholder: 'Your Azure Tenant ID' },
-    { field: 'client_id', label: 'Client ID', placeholder: 'Your Client ID' },
-    { field: 'client_secret', label: 'Client Secret', placeholder: '••••••••', secure: true },
-    { field: 'dynamics_url', label: 'Dynamics URL', placeholder: 'https://yourorg.crm.dynamics.com' },
-  ],
-};
-
 export default function ConnectorSettingsScreen({ navigation }) {
   const [user, setUser] = useState(null);
+  const [userLoaded, setUserLoaded] = useState(false);
   const [connectorType, setConnectorType] = useState('postgresql');
   const [config, setConfig] = useState({ ...DEFAULT_CONFIGS.postgresql });
+  const [loadingCurrent, setLoadingCurrent] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    storage.getItem('user').then((str) => {
-      if (str) setUser(JSON.parse(str));
+    let cancelled = false;
+    getStoredUser().then((stored) => {
+      if (cancelled) return;
+      setUser(stored);
+      setUserLoaded(true);
     });
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  // Show the saved connector (secrets arrive masked) instead of placeholder values.
+  useEffect(() => {
+    if (!userLoaded) return undefined;
+    if (!user?.org_id) {
+      setLoadingCurrent(false);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get(`/organizations/${user.org_id}`);
+        const org = res.data?.organization;
+        const hasConfig = org?.connector_config && Object.keys(org.connector_config).length > 0;
+        if (!cancelled && org && SETTINGS_CONNECTOR_TYPES.includes(org.connector_type) && hasConfig) {
+          setConnectorType(org.connector_type);
+          setConfig({ ...org.connector_config });
+        }
+      } catch {
+        // Not fatal: the admin can still start from the template.
+      } finally {
+        if (!cancelled) setLoadingCurrent(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, userLoaded]);
 
   const handleConnectorTypeChange = (type) => {
     setConnectorType(type);
@@ -83,104 +82,90 @@ export default function ConnectorSettingsScreen({ navigation }) {
   };
 
   const handleSave = async () => {
-    setSaving(true);
+    if (saving) return;
     setError('');
     setSuccess(false);
 
     if (!user?.org_id) {
       setError('No organization associated with your account.');
-      setSaving(false);
       return;
     }
 
+    setSaving(true);
     try {
       const res = await api.patch(`/organizations/${user.org_id}/connector`, {
         connector_type: connectorType,
-        connector_config: config,
+        // Secrets still showing the mask were not changed by the user: never send them back.
+        connector_config: stripMaskedFields(config),
       });
-      if (res.status === 200) {
-        setSuccess(true);
-      }
+      if (res.status === 200) setSuccess(true);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to save connector settings.');
+      setError(getErrorMessage(err, 'Failed to save connector settings.'));
     } finally {
       setSaving(false);
     }
   };
 
-  const fields = CONNECTOR_FIELDS[connectorType] || [];
+  const fields = CONNECTOR_SETTINGS_TEMPLATES[connectorType] || [];
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.backBtnText}>← Back</Text>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          accessibilityHint="Returns to the assistant"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.backBtnText}>{'←'} Back</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Connector Settings</Text>
+        <Text style={styles.headerTitle} accessibilityRole="header">Connector Settings</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.subtitle}>
-          Configure how Lia connects to your CRM or database.
-        </Text>
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <Text style={styles.subtitle}>
+            Configure how Lia connects to your CRM or database. Saved secrets are hidden; leave them unchanged to keep the stored value.
+          </Text>
 
-        {/* Connector type selector */}
-        <Text style={styles.label}>Connector Type</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-          {CONNECTOR_OPTIONS.map((opt) => (
-            <TouchableOpacity
-              key={opt.value}
-              style={[styles.chip, connectorType === opt.value && styles.chipActive]}
-              onPress={() => handleConnectorTypeChange(opt.value)}
-            >
-              <Text style={[styles.chipText, connectorType === opt.value && styles.chipTextActive]}>
-                {opt.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        {/* Dynamic config fields */}
-        <View style={styles.fieldsContainer}>
-          {fields.map((f) => (
-            <View key={f.field} style={styles.formGroup}>
-              <Text style={styles.label}>{f.label}</Text>
-              <TextInput
-                style={styles.input}
-                value={String(config[f.field] ?? '')}
-                onChangeText={(v) => setConfig((prev) => ({ ...prev, [f.field]: v }))}
-                placeholder={f.placeholder}
-                placeholderTextColor="#555"
-                secureTextEntry={!!f.secure}
-                keyboardType={f.keyboardType || 'default'}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
+          {loadingCurrent && (
+            <View style={styles.loadingRow} accessibilityLiveRegion="polite" accessibilityLabel="Loading current settings">
+              <ActivityIndicator color={colors.primary} />
             </View>
-          ))}
-        </View>
-
-        {!!error && (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        )}
-
-        {success && (
-          <View style={styles.successContainer}>
-            <Text style={styles.successText}>✓ Settings saved successfully.</Text>
-          </View>
-        )}
-
-        <TouchableOpacity style={[styles.submitBtn, saving && styles.submitBtnDisabled]} onPress={handleSave} disabled={saving}>
-          {saving ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.submitBtnText}>Save Settings</Text>
           )}
-        </TouchableOpacity>
-      </ScrollView>
+
+          <ChoiceChips
+            label="Connector type"
+            options={CONNECTOR_OPTIONS}
+            value={connectorType}
+            onChange={handleConnectorTypeChange}
+          />
+
+          <ConnectorFields
+            fields={fields}
+            config={config}
+            onChange={(next) => {
+              setConfig(next);
+              setSuccess(false);
+            }}
+            onSubmit={handleSave}
+            editable={!saving}
+          />
+
+          <Banner kind="error" message={error} />
+          <Banner kind="success" message={success ? 'Settings saved successfully.' : ''} />
+
+          <Button
+            label="Save settings"
+            onPress={handleSave}
+            loading={saving}
+            loadingLabel="Saving"
+            disabled={loadingCurrent}
+          />
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

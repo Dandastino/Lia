@@ -3,19 +3,20 @@ from __future__ import annotations
 import copy
 import logging
 import re
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Callable, Dict, List, Optional
 
 import requests
-from sqlalchemy import inspect as sqlalchemy_inspect, text as sqlalchemy_text
+from sqlalchemy import inspect as sqlalchemy_inspect
+from sqlalchemy import text as sqlalchemy_text
 
-from ..models import Organization, User, DatabaseDriver
-from ..extensions import db
 from ..drivers.base import BaseDriver
-from ..drivers.postgresql_driver import PostgreSQLDriver
-from ..drivers.mysql_driver import MySQLDriver
-from ..drivers.hubspot_driver import HubSpotDriver
-from ..drivers.salesforce_driver import SalesforceDriver
 from ..drivers.dynamics_driver import DynamicsDriver
+from ..drivers.hubspot_driver import HubSpotDriver
+from ..drivers.mysql_driver import MySQLDriver
+from ..drivers.postgresql_driver import PostgreSQLDriver
+from ..drivers.salesforce_driver import SalesforceDriver
+from ..extensions import db
+from ..models import DatabaseDriver, Organization, User
 from ..schema.mapper import SchemaMappingService
 from ..utils import normalize_user_id
 
@@ -24,7 +25,7 @@ logger = logging.getLogger("data_manager")
 
 class DataManager:
     """Factory + strategy over connector drivers.
-    
+
     Supports both legacy meeting-specific operations and
     new generic CRUD for managing records within existing entity types.
     """
@@ -58,7 +59,7 @@ class DataManager:
                 org_id=self.org.id,
                 status="failed",
                 target_system=self.org.connector_type or "unknown",
-                error_message=str(e),
+                error_message=str(e)[:500],
             )
             raise
 
@@ -212,7 +213,7 @@ class DataManager:
                             referred_table = fk.get("referred_table")
                             if isinstance(referred_table, str) and referred_table in table_names:
                                 preferred_tables.append(referred_table)
-                    except Exception:
+                    except Exception:  # noqa: S110 - best-effort, failure is expected and handled by the caller
                         # Foreign key metadata is best-effort and may be unavailable.
                         pass
 
@@ -255,7 +256,7 @@ class DataManager:
                             c
                             for c in col_names
                             if isinstance(c, str)
-                            and any(token in c.lower() for token in ["email", "mail"]) 
+                            and any(token in c.lower() for token in ["email", "mail"])
                         ),
                         None,
                     )
@@ -295,7 +296,7 @@ class DataManager:
                     table_name,
                 )
                 return resolved_id
-            except Exception:
+            except Exception:  # noqa: S112 - best-effort, failure is expected and handled by the caller
                 continue
 
         return None
@@ -303,13 +304,13 @@ class DataManager:
     async def _set_driver_owner_context(self, entity_type: str) -> Dict[str, Optional[str]]:
         owner_column = self._resolve_owner_column(entity_type)
         owner_id = await self._resolve_external_owner_id(owner_column=owner_column)
-        setattr(self.driver, "request_owner_column", owner_column)
-        setattr(self.driver, "request_owner_id", owner_id)
+        self.driver.request_owner_column = owner_column
+        self.driver.request_owner_id = owner_id
         return {"owner_column": owner_column, "owner_id": owner_id}
 
     def _clear_driver_owner_context(self) -> None:
-        setattr(self.driver, "request_owner_column", None)
-        setattr(self.driver, "request_owner_id", None)
+        self.driver.request_owner_column = None
+        self.driver.request_owner_id = None
 
     async def _log_sync_operation_async(self, operation: Callable, *args, **kwargs) -> Any:
         """Async version of _log_sync_operation."""
@@ -327,12 +328,12 @@ class DataManager:
                 org_id=self.org.id,
                 status="failed",
                 target_system=self.org.connector_type or "unknown",
-                error_message=str(e),
+                error_message=str(e)[:500],
             )
             raise
 
     @classmethod
-    def from_user_id(cls, user_id: str) -> "DataManager":
+    def from_user_id(cls, user_id: str) -> DataManager:
         normalized_user_id = normalize_user_id(user_id)
         if not normalized_user_id:
             raise ValueError("Missing or invalid user_id in agent context")
@@ -347,7 +348,7 @@ class DataManager:
         org = user.organization
         connector_type = (org.connector_type or "").lower()
         config = org.connector_config or {}
-        
+
         # Verify user is active (not deleted/disabled)
         if not user.email:
             raise ValueError("User email is missing")
@@ -372,7 +373,7 @@ class DataManager:
         return dm
 
     # ===== Legacy Meeting-specific methods =====
-    
+
     def save_meeting(self, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         connector_type = (self.org.connector_type or "").lower()
         owner_user_id = getattr(self, "authorized_user_id", None) or normalize_user_id(user_id)
@@ -429,7 +430,7 @@ class DataManager:
                                     )
 
                 if resolved_owner_id:
-                    setattr(self.driver, "request_owner_id", str(resolved_owner_id))
+                    self.driver.request_owner_id = str(resolved_owner_id)
             except Exception as exc:
                 logger.warning("Failed to resolve HubSpot owner for legacy save_meeting: %s", exc)
 
@@ -441,7 +442,7 @@ class DataManager:
             )
         finally:
             if connector_type == "hubspot":
-                setattr(self.driver, "request_owner_id", None)
+                self.driver.request_owner_id = None
 
         # Keep legacy meeting flow aligned with generic CRUD ownership behavior.
         # Without this, user-scoped history/update paths can miss newly created meetings.
@@ -490,13 +491,13 @@ class DataManager:
 
     async def ensure_entity_mapping(self, entity_type: str) -> None:
         """Discover schema and create mapping for entity type if not already done.
-        
+
         This is called once per entity_type per organization to auto-map
         the external schema to our normalized format.
         """
         # Use a detached copy so SQLAlchemy detects JSONB changes on reassignment.
         config = copy.deepcopy(self.org.connector_config or {})
-        
+
         # Check if mapping already exists
         existing_mapping = config.get("schema_mappings", {}).get(entity_type)
         schema_info = None
@@ -551,20 +552,20 @@ class DataManager:
             self._sync_driver_config(config)
             logger.info("Backfilled table metadata for existing mapping %s", entity_type)
             return
-        
+
         try:
             # Get raw schema from driver
             if schema_info is None:
                 schema_info = await self.driver.get_schema_info()
             logger.info(f"Introspected schema for {entity_type}: {len(schema_info.get('tables', []))} tables")
-            
+
             # Use LLM to understand it
             mapping = await self.schema_mapper.auto_map_entity(
                 entity_type=entity_type,
                 schema_info=schema_info,
                 connector_config=config,
             )
-            
+
             # Save table metadata (columns + required columns) for runtime validation.
             self._enrich_mapping_with_table_metadata(mapping, schema_info)
 
@@ -574,7 +575,7 @@ class DataManager:
             db.session.add(self.org)
             db.session.commit()  # Persist to DB
             self._sync_driver_config(config)
-            
+
             logger.info(f"Created mapping for {entity_type}: {mapping.get('table_name')}")
         except Exception as e:
             logger.error("Failed to auto-map %s: %s", entity_type, self._compact_error(e))
@@ -673,19 +674,21 @@ class DataManager:
         payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Create a new record in an existing entity type in the organization's external system.
-        
+
         Automatically assigns ownership to the current user for data isolation.
         """
         # Ensure mapping exists
         await self.ensure_entity_mapping(entity_type)
-        
+
         owner_scope = await self._set_driver_owner_context(entity_type)
         try:
             owner_column = owner_scope.get("owner_column")
             owner_id = owner_scope.get("owner_id")
 
-            # Auto-stamp owner FK for scoped SQL tables when available.
-            if owner_column and owner_id and owner_column not in payload:
+            # Auto-stamp owner FK for scoped SQL tables when available. The stamp is
+            # authoritative: a caller (or an LLM tool call) must not be able to create
+            # records on behalf of another owner by passing the owner column itself.
+            if owner_column and owner_id:
                 payload[owner_column] = owner_id
 
             # Delegate to driver with sync logging
@@ -696,7 +699,7 @@ class DataManager:
             )
         finally:
             self._clear_driver_owner_context()
-        
+
         # AUTO-ASSIGNMENT: Assign ownership to current user
         if result and result.get("id") and hasattr(self, 'authorized_user_id'):
             try:
@@ -712,7 +715,7 @@ class DataManager:
             except Exception as e:
                 logger.warning(f"Failed to auto-assign ownership: {e}")
                 # Don't fail the whole operation if assignment fails
-        
+
         return result
 
     async def read_entities(
@@ -722,7 +725,7 @@ class DataManager:
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Read records from an existing entity type in the organization's external system.
-        
+
         Automatically filters to entities owned by the user for data isolation.
         SECURITY: Verifies user ownership before returning any data.
         Uses AI-validated schema before querying any tables.
@@ -732,23 +735,23 @@ class DataManager:
             user_id_to_use = user_id or getattr(self, 'authorized_user_id', None)
             if not user_id_to_use:
                 raise ValueError("No user_id provided or authorized user not set")
-            
+
             # Additional safety check - ensure this user is from the same org as the driver
             if hasattr(self, 'authorized_user'):
                 if str(self.authorized_user.org_id) != str(self.org.id):
                     raise ValueError("User organization mismatch")
-            
+
             # Ensure mapping exists for external entity type
             await self.ensure_entity_mapping(entity_type)
 
             owner_scope = await self._set_driver_owner_context(entity_type)
             owner_column = owner_scope.get("owner_column")
             owner_id = owner_scope.get("owner_id")
-            
+
             # Build a mutable filter bag.
             if not filters:
                 filters = {}
-            
+
             # Enforce owner scope when we can map both owner column and owner id.
             if owner_column and owner_id:
                 filters[owner_column] = owner_id
@@ -866,7 +869,7 @@ class DataManager:
             raise ValueError(
                 f"Unauthorized update: user does not own {entity_type} entity {entity_id}"
             )
-        
+
         await self._set_driver_owner_context(entity_type)
         try:
             # Delegate to driver with sync logging
@@ -893,7 +896,7 @@ class DataManager:
             raise ValueError(
                 f"Unauthorized delete: user does not own {entity_type} entity {entity_id}"
             )
-        
+
         await self._set_driver_owner_context(entity_type)
         try:
             # Delegate to driver with sync logging

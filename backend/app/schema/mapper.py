@@ -1,14 +1,14 @@
 """LLM-powered schema understanding and entity-to-table mapping."""
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
-from datetime import datetime, timedelta
-from .common import is_usable_column_name, strip_fenced_json
 
-import json
-import os
 import asyncio
+import json
 import logging
+import os
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
+from .common import is_usable_column_name, strip_fenced_json
 
 logger = logging.getLogger("schema_mapper")
 
@@ -19,7 +19,7 @@ _PROMPT_MAX_COLUMNS_PER_TABLE = 40
 
 class SchemaMappingService:
     """Uses GPT to understand external DB schemas semantically.
-    
+
     Given a raw schema, asks: "Which table stores meetings? Which holds patient data?"
     Learns the semantic structure independent of naming conventions.
     """
@@ -28,7 +28,7 @@ class SchemaMappingService:
         """
         Args:
             llm_model: OpenAI client instance. If None, creates new AsyncOpenAI client.
-            llm_model_name: Model name (e.g., 'gpt-4', 'gpt-3.5-turbo'). 
+            llm_model_name: Model name (e.g., 'gpt-4', 'gpt-3.5-turbo').
                           Defaults to env var LLM_MODEL_NAME or 'gpt-3.5-turbo'.
             max_retries: Max retry attempts for transient LLM errors (default: 3)
         """
@@ -45,12 +45,12 @@ class SchemaMappingService:
         connector_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Use LLM to infer which table + columns map to an entity type.
-        
+
         Args:
             entity_type: "meeting", "patient", "contact", "call", etc.
             schema_info: Raw schema from SchemaInspector.introspect_tables()
             connector_config: Optional org config for hints/overrides
-            
+
         Returns:
             {
                 "entity_type": "meeting",
@@ -68,7 +68,7 @@ class SchemaMappingService:
             }
         """
         cache_key = f"{entity_type}:{json.dumps(schema_info, sort_keys=True)}"
-        
+
         # Check cache (with 1-hour TTL)
         if cache_key in self.schema_cache:
             expiry = self._cache_expiry.get(cache_key)
@@ -82,20 +82,20 @@ class SchemaMappingService:
                     del self._cache_expiry[cache_key]
 
         prompt = self._build_mapping_prompt(entity_type, schema_info, connector_config)
-        
+
         try:
             # Call LLM with retry logic
             response = await self._call_llm_with_retry(prompt)
             mapping = self._parse_mapping_response(response, entity_type)
-            
+
             # Validate mapping structure against raw introspected schema.
             self._validate_mapping(mapping, entity_type, schema_info)
-            
+
             # Cache result with 1-hour TTL
             self.schema_cache[cache_key] = mapping
             self._cache_expiry[cache_key] = datetime.utcnow() + timedelta(hours=1)
             logger.info(f"Auto-mapped {entity_type} to table: {mapping.get('table_name')} (confidence: {mapping.get('confidence', 'N/A')})")
-            
+
             return mapping
         except Exception as e:
             logger.error(f"Failed to auto-map {entity_type}: {e}")
@@ -116,8 +116,8 @@ class SchemaMappingService:
             hints += f"\nIndustry: {connector_config.get('industry')}"
         if connector_config and connector_config.get("name"):
             hints += f"\nOrganization: {connector_config.get('name')}"
-        
-        prompt = f"""You are a database schema analyst. Given a raw database schema, 
+
+        prompt = f"""You are a database schema analyst. Given a raw database schema,
 determine which table stores data for a specific entity type.
 
 Entity Type: {entity_type}
@@ -269,7 +269,7 @@ Return ONLY the JSON, no other text."""
 
     async def _call_llm(self, prompt: str) -> str:
         """Call OpenAI LLM to analyze schema.
-        
+
         Uses provided llm_model client if available, otherwise creates new AsyncOpenAI client.
         """
         try:
@@ -279,20 +279,20 @@ Return ONLY the JSON, no other text."""
             else:
                 from openai import AsyncOpenAI
                 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            
+
             logger.debug(f"Calling LLM ({self.llm_model_name}) for schema analysis")
-            
+
             response = await client.chat.completions.create(
                 model=self.llm_model_name,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,  # Low temp for deterministic schema analysis
                 timeout=30.0  # 30 second timeout
             )
-            
+
             content = response.choices[0].message.content
             if not content or not content.strip():
                 raise ValueError("Empty response from LLM")
-            
+
             return content
         except Exception as e:
             logger.error(f"LLM call failed: {str(e)}")
@@ -300,7 +300,7 @@ Return ONLY the JSON, no other text."""
 
     def _parse_mapping_response(self, response: str, entity_type: str) -> Dict[str, Any]:
         """Parse LLM response into structured mapping.
-        
+
         Extracts JSON and validates required fields.
         """
         try:
@@ -310,8 +310,8 @@ Return ONLY the JSON, no other text."""
             return mapping
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse LLM response as JSON: {response[:200]}...")
-            raise ValueError(f"LLM response is not valid JSON: {e}")
-    
+            raise ValueError(f"LLM response is not valid JSON: {e}") from e
+
     def _validate_mapping(
         self,
         mapping: Dict[str, Any],
@@ -319,7 +319,7 @@ Return ONLY the JSON, no other text."""
         schema_info: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Validate mapping has required fields and sanitize optional empty columns.
-        
+
         Raises ValueError if mapping is invalid.
         """
         required_fields = ["table_name", "id_column", "column_mapping"]
@@ -329,7 +329,7 @@ Return ONLY the JSON, no other text."""
                     f"Invalid mapping for {entity_type}: missing required field '{field}'. "
                     f"Full mapping: {json.dumps(mapping)}"
                 )
-        
+
         # Validate column_mapping structure
         column_mapping = mapping.get("column_mapping", {})
         if not isinstance(column_mapping, dict):
@@ -440,15 +440,15 @@ Return ONLY the JSON, no other text."""
         connector_config: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Save a mapping to org's connector_config for future use.
-        
+
         Mutates connector_config in-place to include schema mappings.
         """
         if "schema_mappings" not in connector_config:
             connector_config["schema_mappings"] = {}
-        
+
         entity_type = mapping.get("entity_type")
         connector_config["schema_mappings"][entity_type] = mapping
-        
+
         logger.info(f"Saved mapping for {entity_type} to config")
         return connector_config
 
@@ -458,7 +458,7 @@ Return ONLY the JSON, no other text."""
         connector_config: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Retrieve cached mapping for an entity type, if available.
-        
+
         Checks both in-memory cache and connector_config.
         """
         # Check in-memory cache first
@@ -467,11 +467,11 @@ Return ONLY the JSON, no other text."""
                 expiry = self._cache_expiry.get(cache_key)
                 if expiry and datetime.utcnow() < expiry:
                     return mapping
-        
+
         # Check connector_config
         if connector_config and "schema_mappings" in connector_config:
             return connector_config["schema_mappings"].get(entity_type)
-        
+
         return None
 
     async def identify_owner_column(
@@ -481,12 +481,12 @@ Return ONLY the JSON, no other text."""
         entity_type: str,
     ) -> Dict[str, Any]:
         """Use LLM to identify which column represents ownership/assignment in a table.
-        
+
         Args:
             table_name: Name of the table to analyze
             table_schema: Schema info {"columns": [...], "column_types": {...}, ...}
             entity_type: Entity type (e.g., "patient", "contact") for context
-            
+
         Returns:
             {
                 "owner_column": "doctor_id",  # Actual DB column name
@@ -496,7 +496,7 @@ Return ONLY the JSON, no other text."""
             }
         """
         cache_key = f"owner:{table_name}:{entity_type}"
-        
+
         # Check cache (1-hour TTL)
         if cache_key in self.schema_cache:
             expiry = self._cache_expiry.get(cache_key)
@@ -507,18 +507,18 @@ Return ONLY the JSON, no other text."""
                 del self.schema_cache[cache_key]
                 if cache_key in self._cache_expiry:
                     del self._cache_expiry[cache_key]
-        
+
         prompt = self._build_owner_column_prompt(table_name, table_schema, entity_type)
-        
+
         try:
             response = await self._call_llm_with_retry(prompt)
             result = self._parse_owner_column_response(response, table_name)
-            
+
             # Cache result with 1-hour TTL
             self.schema_cache[cache_key] = result
             self._cache_expiry[cache_key] = datetime.utcnow() + timedelta(hours=1)
             logger.info(f"Identified owner column for {table_name}: {result.get('owner_column')} (confidence: {result.get('confidence', 'N/A')})")
-            
+
             return result
         except Exception as e:
             logger.error(f"Failed to identify owner column for {table_name}: {e}")
@@ -533,12 +533,12 @@ Return ONLY the JSON, no other text."""
         """Build a prompt asking LLM to identify the owner/assignment column."""
         columns = table_schema.get("columns", [])
         column_types = table_schema.get("column_types", {})
-        
+
         columns_info = "\n".join([
             f"  - {col}: {column_types.get(col, 'unknown')}"
             for col in columns
         ])
-        
+
         prompt = f"""You are a database schema analyst. Given a table schema, identify which column represents ownership or assignment.
 
 Table Name: {table_name}
@@ -567,17 +567,17 @@ Return ONLY the JSON, no other text."""
         """Parse LLM response into owner column info."""
         try:
             result = json.loads(strip_fenced_json(response))
-            
+
             # Validate response
             if not result.get("owner_column"):
                 raise ValueError("Response missing 'owner_column'")
             if not isinstance(result.get("confidence"), (int, float)):
                 raise ValueError("Response missing numeric 'confidence'")
-            
+
             return result
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse owner column response: {response[:200]}...")
-            raise ValueError(f"LLM response is not valid JSON: {e}")
+            raise ValueError(f"LLM response is not valid JSON: {e}") from e
 
     async def identify_email_column(
         self,
@@ -586,12 +586,12 @@ Return ONLY the JSON, no other text."""
         user_type: str,
     ) -> Dict[str, Any]:
         """Discover which column contains email addresses using pattern matching.
-        
+
         Args:
             table_name: Name of the table to analyze
             table_schema: Schema info {"columns": [...], "column_types": {...}, ...}
             user_type: User type for context (e.g., "owner", "agent", "user")
-            
+
         Returns:
             {
                 "email_column": "contact_email",
@@ -600,7 +600,7 @@ Return ONLY the JSON, no other text."""
             }
         """
         cache_key = f"email:{table_name}:{user_type}"
-        
+
         # Check cache (1-hour TTL)
         if cache_key in self.schema_cache:
             expiry = self._cache_expiry.get(cache_key)
@@ -611,10 +611,10 @@ Return ONLY the JSON, no other text."""
                 del self.schema_cache[cache_key]
                 if cache_key in self._cache_expiry:
                     del self._cache_expiry[cache_key]
-        
+
         columns = table_schema.get("columns", [])
         column_names = [c if isinstance(c, str) else c.get("name") for c in columns]
-        
+
         # Pattern-based email column discovery (common naming conventions)
         email_patterns = [
             "email",
@@ -626,7 +626,7 @@ Return ONLY the JSON, no other text."""
             "contact_email",
             "address_mail",
         ]
-        
+
         for pattern in email_patterns:
             for col_name in column_names:
                 if col_name.lower() == pattern.lower():
@@ -635,13 +635,13 @@ Return ONLY the JSON, no other text."""
                         "confidence": 0.95,  # High confidence for exact pattern match
                         "method": "pattern_matching",
                     }
-                    
+
                     # Cache result with 1-hour TTL
                     self.schema_cache[cache_key] = result
                     self._cache_expiry[cache_key] = datetime.utcnow() + timedelta(hours=1)
                     logger.info(f"Identified email column for {table_name}: {col_name}")
                     return result
-        
+
         # Not found
         logger.warning(
             f"Could not identify email column in {table_name}. "

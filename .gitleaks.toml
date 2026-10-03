@@ -1,0 +1,12 @@
+title = "Lia gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Throw-away values used only by the automated test suite"
+paths = [
+  '''backend/tests/.*''',
+  '''frontend/e2e/.*''',
+  '''frontend/src/.*\.test\.jsx?''',
+]

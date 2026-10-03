@@ -1,4 +1,4 @@
-.PHONY: help build up down logs shell-backend shell-db restart clean build-prod up-prod down-prod
+.PHONY: help build up down logs shell-backend shell-db restart clean build-prod up-prod down-prod init test-backend test-frontend lint
 
 help:
 	@echo "Lia Docker Commands:"
@@ -32,7 +32,6 @@ up:
 	@echo "Lia is running!"
 	@echo "Frontend: http://localhost:3000"
 	@echo "Backend:  http://localhost:5000"
-	@echo "API Docs: http://localhost:5000/api/docs"
 
 down:
 	docker-compose down
@@ -83,12 +82,6 @@ logs-prod:
 	docker-compose -f docker-compose.production.yml logs -f
 
 # Database commands
-migrate:
-	docker-compose exec backend python -m alembic upgrade head
-
-seed-db:
-	docker-compose exec backend python scripts/seed_data.py
-
 backup-db:
 	docker-compose exec db pg_dump -U postgres -d lia_db > backup_$(shell date +%Y%m%d_%H%M%S).sql
 
@@ -98,22 +91,22 @@ restore-db:
 		docker-compose exec -T db psql -U postgres -d lia_db < $(BACKUP)
 	endif
 
-# Testing
+# Testing (run on the host; see README "Running the checks")
 test-backend:
-	docker-compose run --rm backend pytest tests/
+	cd backend && python -m pytest --cov=app
 
 test-frontend:
-	docker-compose run --rm frontend npm test
+	cd frontend && npm test
 
 lint:
-	docker-compose run --rm backend flake8 .
-	docker-compose run --rm frontend npm run lint
+	cd backend && ruff check .
+	cd frontend && npm run lint
 
 # Development setup
 init:
-	cp .env.docker .env
-	@echo "✓ Environment file created (.env)"
-	@echo "✓ Update .env with your API keys before running 'make up'"
+	cp -n .env.example .env || true
+	cp -n backend/.env.example backend/.env || true
+	@echo "Environment files created. Edit .env and backend/.env (JWT_SECRET_KEY, CONNECTOR_ENCRYPTION_KEY, API keys) before 'make up'"
 
 # Utility
 version:
