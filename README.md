@@ -188,6 +188,7 @@ Voice input -> Lia processing -> tool call -> DataManager routing -> connector d
 | Backend tests against real PostgreSQL/MySQL | set `POSTGRES_TEST_URL` / `MYSQL_TEST_URL` (see [docs/TESTING.md](docs/TESTING.md)) |
 | Frontend lint / unit / build | `cd frontend && npm ci && npm run lint && npm run test:coverage && npm run build` |
 | Frontend end-to-end | `cd frontend && npm run test:e2e` |
+| Mobile lint / tests | `cd mobile && npm ci && npm run lint && npm run test:coverage` |
 
 Every pull request runs the same checks in CI; see [docs/CI_CD.md](docs/CI_CD.md).
 

@@ -141,6 +141,32 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  mobile-lint-test:
+    name: mobile-lint-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:coverage
+      - name: Upload mobile coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-coverage
+          path: mobile/coverage
+          if-no-files-found: ignore
+          retention-days: 14
+
   frontend-e2e:
     name: frontend-e2e
     runs-on: ubuntu-latest
@@ -261,6 +287,7 @@ jobs:
       - backend-test
       - frontend-lint-test-build
       - frontend-e2e
+      - mobile-lint-test
       - security-pip-audit
       - security-npm-audit
       - secret-scan

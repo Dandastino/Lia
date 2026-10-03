@@ -18,8 +18,9 @@ All automation lives in `.github/`. No deploy target is defined here; the pipeli
 |---|---|---|
 | `ci-passed` | Aggregates all jobs below (fails on failure/cancel/skip) | **Yes (the only one to require)** |
 | `backend-lint` | `ruff check .` | via ci-passed |
-| `backend-test` | pytest + coverage gate (70%), with postgres:15 and mysql:8 services | via ci-passed |
+| `backend-test` | pytest + coverage gate (85%), with postgres:15 and mysql:8 services | via ci-passed |
 | `frontend-lint-test-build` | `npm ci`, lint, `test:coverage`, build | via ci-passed |
+| `mobile-lint-test` | `npm ci`, lint, `test:coverage` in `mobile/` | via ci-passed |
 | `frontend-e2e` | Playwright (chromium) against the built app | via ci-passed |
 | `security-pip-audit` | `pip-audit -r backend/requirements.txt` | via ci-passed |
 | `security-npm-audit` | `npm audit --audit-level=high` | via ci-passed |

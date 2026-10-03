@@ -15,7 +15,7 @@ logs.
 | API | Flask 3, SQLAlchemy 2, flask-jwt-extended, gunicorn | `backend/app` |
 | Voice agent | livekit-agents + OpenAI Realtime | `backend/agent.py` |
 | Web | React 18 + Vite (+ LiveKit components) | `frontend/` |
-| Mobile | Expo / React Native | `mobile/` (untested, only touched for the masked-secret edge) |
+| Mobile | Expo / React Native | `mobile/` (HCI fixes and Jest tests added; see mobile/docs/MOBILE_UX_AUDIT.md) |
 | Deploy | Docker Compose (dev/prod), nginx | `docker-compose*.yml`, `nginx.prod.conf` |
 
 ## 2. Architecture analysis
@@ -94,6 +94,7 @@ Before: **zero** tests; Makefile referenced non-existent ones. Difficult-to-test
 | Provider integration (mocked HTTP) | 445 | HubSpot, Salesforce, Dynamics: OAuth/401 retry, CRUD, schema, SOQL/OData escaping, owner/ownership |
 | Real database integration | 36 (18 × PostgreSQL 15, MySQL 8) | same scenarios on both: CRUD, owner isolation, FK name resolution, injection attempts, legacy meetings |
 | Frontend unit/component | 81 | 93 % statements / 89 % branches |
+| Mobile (Jest, jest-expo) | 124 | 97 % statements / 92 % branches; not run on a device |
 | Frontend E2E (Playwright) | 16 | login, roles, session expiry, admin CRUD with confirm dialog, keyboard/a11y smoke, mobile viewport |
 
 Backend total: **849 tests, 93 % line+branch coverage** with both databases (815 passed / 34 skipped, 87 %+ without
@@ -149,7 +150,7 @@ answered from code. Added `GET /me/export`, `DELETE /me`, `PUT /me/password`, `p
 2. Permissive tenant read defaults and global `admin` role (SECURITY.md §2–3).
 3. Token in `localStorage`, no revocation/refresh; in-memory rate-limit store.
 4. Large modules/duplicated SQL driver logic (§8); HubSpot `limit` unclamped; Salesforce/Dynamics ignore owner scope.
-5. `agent.py`, `prompts.py`, mobile app untested; no load tests; no audit log of admin actions.
+5. `agent.py`, `prompts.py` untested; mobile tested only in Jest (no device/screen-reader run); no load tests; no audit log of admin actions.
 6. `three`, `@react-three/*`, `@readyplayerme/visage` are unused in the web app (left in `package.json`).
 7. Git history still contains the old seeded admin password: rotate it; rewrite history only if desired.
 8. Navigation without URLs; no i18n; UI not visually reviewed by a human.

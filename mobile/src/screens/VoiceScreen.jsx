@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   PermissionsAndroid,
   Animated,
   Easing,
+  AccessibilityInfo,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -20,8 +21,9 @@ import {
   useRoomContext,
 } from '@livekit/react-native';
 import { RoomEvent } from 'livekit-client';
-import { api } from '../lib/api';
-import { storage } from '../lib/storage';
+import { api, getErrorMessage } from '../lib/api';
+import { clearSession, getStoredUser } from '../lib/storage';
+import { colors } from '../theme';
 import { styles, waveStyles, statusStyles } from './VoiceScreen.styles';
 
 let liveKitGlobalsRegistered = false;
@@ -65,18 +67,18 @@ function WaveformDisplay({ active, isUser }) {
     );
     animations.forEach((a) => a.start());
     return () => animations.forEach((a) => a.stop());
-  }, [active]);
+  }, [active, bars]);
 
-  const color = isUser ? '#10b981' : '#667eea';
+  const color = isUser ? colors.success : colors.primary;
 
   return (
-    <View style={waveStyles.container}>
+    <View style={waveStyles.container} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
       {bars.map((anim, i) => (
         <Animated.View
           key={i}
           style={[
             waveStyles.bar,
-            { backgroundColor: active ? color : '#333', transform: [{ scaleY: anim }] },
+            { backgroundColor: active ? color : colors.surfaceRaised, transform: [{ scaleY: anim }] },
           ]}
         />
       ))}
@@ -88,14 +90,19 @@ function WaveformDisplay({ active, isUser }) {
 
 function StatusIndicator({ state, isUserSpeaking }) {
   const config = {
-    connecting: { color: '#f59e0b', text: 'Connecting...' },
-    listening: { color: '#10b981', text: isUserSpeaking ? 'You are speaking...' : 'Listening...' },
-    speaking: { color: '#667eea', text: 'Lia is speaking...' },
-    idle: { color: '#666', text: 'Ready to talk' },
+    connecting: { color: colors.warning, text: 'Connecting...' },
+    listening: { color: colors.success, text: isUserSpeaking ? 'You are speaking...' : 'Listening...' },
+    speaking: { color: colors.primary, text: 'Lia is speaking...' },
+    idle: { color: colors.textMuted, text: 'Ready to talk' },
   };
   const { color, text } = config[state] || config.idle;
   return (
-    <View style={statusStyles.row}>
+    <View
+      style={statusStyles.row}
+      accessible
+      accessibilityLabel={`Status: ${text}`}
+      accessibilityLiveRegion="polite"
+    >
       <View style={[statusStyles.dot, { backgroundColor: color }]} />
       <Text style={[statusStyles.text, { color }]}>{text}</Text>
     </View>
@@ -196,21 +203,28 @@ function VoiceControls({ onDisconnect }) {
   ];
 
   const toggleMic = async () => {
-    if (localParticipant) {
-      await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
+    if (!localParticipant) return;
+    const next = !isMicrophoneEnabled;
+    try {
+      await localParticipant.setMicrophoneEnabled(next);
+      AccessibilityInfo.announceForAccessibility(next ? 'Microphone on' : 'Microphone muted');
+    } catch {
+      AccessibilityInfo.announceForAccessibility('Could not change the microphone state');
     }
   };
 
   const renderMessage = ({ item, index }) => (
     <View
       key={index}
+      accessible
+      accessibilityLabel={`${item.type === 'user' ? 'You' : 'Lia'}: ${item.text}`}
       style={[
         styles.message,
         item.type === 'user' ? styles.userMessage : styles.aiMessage,
         item.typing && styles.typingMessage,
       ]}
     >
-      <Text style={styles.messageAvatar}>{item.type === 'user' ? '👤' : '🤖'}</Text>
+      <Text style={styles.messageAvatar} accessibilityElementsHidden importantForAccessibility="no">{item.type === 'user' ? '👤' : '🤖'}</Text>
       <Text style={styles.messageText}>
         {item.text}
         {item.typing ? <Text style={styles.cursor}>|</Text> : null}
@@ -264,8 +278,12 @@ function VoiceControls({ onDisconnect }) {
           ]}
           onPress={toggleMic}
           activeOpacity={0.8}
+          accessibilityRole="switch"
+          accessibilityLabel="Microphone"
+          accessibilityHint={isMicrophoneEnabled ? 'Double tap to mute' : 'Double tap to unmute'}
+          accessibilityState={{ checked: !!isMicrophoneEnabled }}
         >
-          <Text style={styles.controlBtnIcon}>{isMicrophoneEnabled ? '🎤' : '🔇'}</Text>
+          <Text style={styles.controlBtnIcon} accessibilityElementsHidden importantForAccessibility="no">{isMicrophoneEnabled ? '🎤' : '🔇'}</Text>
           <Text style={styles.controlBtnLabel}>
             {isMicrophoneEnabled ? 'Mute' : 'Unmute'}
           </Text>
@@ -275,13 +293,32 @@ function VoiceControls({ onDisconnect }) {
           style={[styles.controlBtn, styles.disconnectBtn]}
           onPress={onDisconnect}
           activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="End conversation"
+          accessibilityHint="Disconnects from Lia"
         >
-          <Text style={styles.controlBtnIcon}>✕</Text>
+          <Text style={styles.controlBtnIcon} accessibilityElementsHidden importantForAccessibility="no">✕</Text>
           <Text style={styles.controlBtnLabel}>End</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
+}
+
+async function requestMicPermission() {
+  if (Platform.OS !== 'android') {
+    return true;
+  }
+  const result = await PermissionsAndroid.request(
+    PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+    {
+      title: 'Microphone Permission',
+      message: 'Lia needs microphone access for real-time voice conversations.',
+      buttonPositive: 'Allow',
+      buttonNegative: 'Deny',
+    }
+  );
+  return result === PermissionsAndroid.RESULTS.GRANTED;
 }
 
 // ─── VoiceScreen (outer) ────────────────────────────────────────────────────
@@ -295,26 +332,14 @@ export default function VoiceScreen({ navigation }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    storage.getItem('user').then((str) => {
-      if (str) setUser(JSON.parse(str));
+    let cancelled = false;
+    getStoredUser().then((stored) => {
+      if (!cancelled && stored) setUser(stored);
     });
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  const requestMicPermission = async () => {
-    if (Platform.OS !== 'android') {
-      return true;
-    }
-    const result = await PermissionsAndroid.request(
-      PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-      {
-        title: 'Microphone Permission',
-        message: 'Lia needs microphone access for real-time voice conversations.',
-        buttonPositive: 'Allow',
-        buttonNegative: 'Deny',
-      }
-    );
-    return result === PermissionsAndroid.RESULTS.GRANTED;
-  };
 
   const getToken = useCallback(async () => {
     if (!user) return;
@@ -354,12 +379,7 @@ export default function VoiceScreen({ navigation }) {
       setIsConnecting(false);
       setIsConnected(true);
     } catch (err) {
-      const msg =
-        err.response?.data?.error ||
-        err.response?.data?.msg ||
-        err.message ||
-        'Failed to connect. Please try again.';
-      setError(msg);
+      setError(getErrorMessage(err, 'Failed to connect. Please try again.'));
       setIsConnecting(false);
     }
   }, [user]);
@@ -377,15 +397,14 @@ export default function VoiceScreen({ navigation }) {
 
   const handleLogout = async () => {
     await handleDisconnect();
-    await storage.removeItem('token');
-    await storage.removeItem('user');
+    await clearSession();
     navigation.replace('Login');
   };
 
   if (!user) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#667eea" />
+      <View style={styles.loadingContainer} accessibilityLabel="Loading" accessibilityLiveRegion="polite">
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -396,7 +415,7 @@ export default function VoiceScreen({ navigation }) {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Lia</Text>
+        <Text style={styles.headerTitle} accessibilityRole="header">Lia</Text>
         <View style={styles.headerRight}>
           <Text style={styles.headerUser} numberOfLines={1}>
             {user.name || user.email}
@@ -405,16 +424,29 @@ export default function VoiceScreen({ navigation }) {
             <TouchableOpacity
               style={styles.headerBtn}
               onPress={() => navigation.navigate('ConnectorSettings')}
+              accessibilityRole="button"
+              accessibilityLabel="Connector settings"
             >
-              <Text style={styles.headerBtnText}>⚙️</Text>
+              <Text style={styles.headerBtnText} accessibilityElementsHidden importantForAccessibility="no">⚙️</Text>
             </TouchableOpacity>
           )}
           {!!error && (
-            <TouchableOpacity style={styles.headerBtn} onPress={getToken}>
-              <Text style={styles.headerBtnText}>↻</Text>
+            <TouchableOpacity
+              style={styles.headerBtn}
+              onPress={getToken}
+              accessibilityRole="button"
+              accessibilityLabel="Retry connecting"
+            >
+              <Text style={styles.headerBtnText} accessibilityElementsHidden importantForAccessibility="no">↻</Text>
             </TouchableOpacity>
           )}
-          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+          <TouchableOpacity
+            style={styles.logoutBtn}
+            onPress={handleLogout}
+            accessibilityRole="button"
+            accessibilityLabel="Logout"
+            accessibilityHint="Ends the conversation and signs out"
+          >
             <Text style={styles.logoutBtnText}>Logout</Text>
           </TouchableOpacity>
         </View>
@@ -424,23 +456,36 @@ export default function VoiceScreen({ navigation }) {
       <View style={styles.content}>
         {!!error && (
           <View style={styles.errorBanner}>
-            <Text style={styles.errorBannerText}>{error}</Text>
-            <TouchableOpacity onPress={getToken} style={styles.retryBtn}>
+            <Text style={styles.errorBannerText} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+              {error}
+            </Text>
+            <TouchableOpacity
+              onPress={getToken}
+              style={styles.retryBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Retry"
+              accessibilityHint="Tries to connect to Lia again"
+            >
               <Text style={styles.retryBtnText}>Retry</Text>
             </TouchableOpacity>
           </View>
         )}
 
         {isConnecting && !error && (
-          <View style={styles.centerContent}>
-            <ActivityIndicator size="large" color="#667eea" />
+          <View style={styles.centerContent} accessibilityLiveRegion="polite">
+            <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.connectingText}>Connecting to Lia...</Text>
           </View>
         )}
 
         {!isConnecting && !isConnected && !error && (
           <View style={styles.centerContent}>
-            <TouchableOpacity style={styles.reconnectBtn} onPress={getToken}>
+            <TouchableOpacity
+              style={styles.reconnectBtn}
+              onPress={getToken}
+              accessibilityRole="button"
+              accessibilityLabel="Connect to Lia"
+            >
               <Text style={styles.reconnectBtnText}>Connect to Lia</Text>
             </TouchableOpacity>
           </View>

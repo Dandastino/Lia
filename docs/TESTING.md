@@ -9,6 +9,7 @@
 | `backend/tests/integration/providers/` | HubSpot, Salesforce and Dynamics drivers; every outbound HTTP call mocked with `responses` |
 | `backend/tests/integration/test_sql_drivers_real_db.py` | PostgreSQL and MySQL drivers against **real servers** (same scenarios on both) |
 | `frontend/src/**/*.test.jsx` | Vitest + Testing Library component tests (API and LiveKit mocked) |
+| `mobile/src/**/__tests__/` | Jest (`jest-expo`) + React Native Testing Library: screens, navigation, API/401 handling, validation (native modules mocked) |
 | `frontend/e2e/` | Playwright user flows on Chromium against `vite preview`, API mocked with `page.route` |
 
 The default backend suite needs no services: the Flask app runs on in-memory SQLite (`GUID` and `EncryptedJSON`
@@ -48,5 +49,5 @@ The coverage gate is 85 % for the backend (CI runs with both databases and sits 
 
 * `agent.py` (LiveKit worker entrypoint) and `prompts.py` are not exercised; they need a LiveKit/OpenAI sandbox.
 * HubSpot/Salesforce/Dynamics are tested against mocks of the documented API, never against live tenants.
-* Mobile app (`mobile/`) has no automated tests.
+* Mobile: tests run in Jest only; nothing is verified on a device/emulator, with TalkBack/VoiceOver, or against a real LiveKit session. Audit: `mobile/docs/MOBILE_UX_AUDIT.md`.
 * Load/performance tests do not exist.
