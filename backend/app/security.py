@@ -22,7 +22,6 @@ MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 72  # bcrypt ignores bytes beyond 72
 MAX_CONNECTOR_CONFIG_CHARS = 256 * 1024
 
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _SECRET_KEY_TOKENS = ("password", "secret", "token", "api_key", "apikey", "private_key", "credential")
 _SALESFORCE_HOST_SUFFIXES = (".salesforce.com", ".force.com", ".salesforce.mil")
 _DYNAMICS_HOST_SUFFIXES = (".dynamics.com", ".dynamics.cn", ".microsoftdynamics.us", ".microsoftdynamics.de")
@@ -52,7 +51,14 @@ def normalize_email(value: Any) -> str:
 
 
 def is_valid_email(value: str) -> bool:
-    return bool(value) and len(value) <= 255 and bool(_EMAIL_RE.match(value))
+    """Pragmatic check (no regex, so no backtracking): one '@', dotted domain, no whitespace."""
+    if not value or len(value) > 255 or any(ch.isspace() for ch in value):
+        return False
+    local, sep, domain = value.partition("@")
+    if not sep or not local or "@" in domain:
+        return False
+    labels = domain.split(".")
+    return len(labels) >= 2 and all(labels)
 
 
 def validate_password(password: Any) -> Optional[str]:

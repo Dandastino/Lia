@@ -64,9 +64,8 @@ def create_user(email: str, password: str, org_id: str, role: str = "user"):
     if not is_valid_email(email):
         print("✗ Invalid email address")
         return None
-    password_error = validate_password(password)
-    if password_error:
-        print(f"✗ {password_error}")
+    if validate_password(password):
+        print("✗ Password does not meet the policy (8 to 72 bytes)")
         return None
     if role not in ALLOWED_ROLES:
         print(f"✗ Invalid role. Choose one of: {', '.join(sorted(ALLOWED_ROLES))}")
