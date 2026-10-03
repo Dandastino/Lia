@@ -17,7 +17,7 @@
     "@livekit/components-react": "^2.7.0",
     "@livekit/components-styles": "^1.1.4",
     "@react-three/drei": "^9.95.0",
-    "@react-three/fiber": "^8.15.0",
+    "@react-three/fiber": "^9.8.1",
     "@readyplayerme/visage": "^2.0.0",
     "axios": "^1.6.0",
     "livekit-client": "^2.8.0",
