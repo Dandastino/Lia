@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-import requests
 import logging
 import re
+from typing import Any, Dict, List, Optional
+from urllib.parse import quote
+
+import requests
+
+from ..security import validate_salesforce_instance_url
 from .base import BaseDriver
 from .sql_driver_common import get_entity_mapping
 
@@ -15,7 +19,7 @@ _SKIP_PAYLOAD_KEYS = {"related_entities", "metadata", "participants"}
 
 class SalesforceDriver(BaseDriver):
     """Salesforce API connector.
-    
+
     Security: All API calls use HTTPS with SSL/TLS encryption.
     SSL certificate verification is enabled by default via requests library.
     """
@@ -27,7 +31,7 @@ class SalesforceDriver(BaseDriver):
         self.client_secret = self.config.get("client_secret")
         self.username = self.config.get("username")
         self.password = self.config.get("password")
-        
+
         # SSL verification enabled by default, can be disabled for testing (not recommended)
         self.verify_ssl = self.config.get("verify_ssl", True)
         try:
@@ -39,6 +43,11 @@ class SalesforceDriver(BaseDriver):
             raise ValueError(
                 "Salesforce credentials (instance_url, client_id, client_secret, username, password) are required"
             )
+
+        # The OAuth password grant posts client secret + user password to instance_url.
+        url_error = validate_salesforce_instance_url(self.instance_url)
+        if url_error:
+            raise ValueError(url_error)
 
         self.access_token: Optional[str] = None
         self._refresh_token()
@@ -67,7 +76,7 @@ class SalesforceDriver(BaseDriver):
                 raise ValueError("Salesforce OAuth token response did not include access_token")
             logger.info("Salesforce access token refreshed")
         except requests.exceptions.RequestException as e:
-            raise Exception(f"Failed to obtain Salesforce access token: {str(e)}")
+            raise Exception(f"Failed to obtain Salesforce access token: {str(e)}") from e
 
     def _get_headers(self) -> Dict[str, str]:
         return {
@@ -81,12 +90,12 @@ class SalesforceDriver(BaseDriver):
         kwargs.setdefault("verify", self.verify_ssl)
         kwargs.setdefault("timeout", self.request_timeout_seconds)
 
-        response = requests.request(method.upper(), url, **kwargs)
+        response = requests.request(method.upper(), url, **kwargs)  # noqa: S113 - timeout is set through kwargs.setdefault above
         if response.status_code == 401 and retry_on_401:
             logger.warning("Salesforce request unauthorized, refreshing token and retrying once")
             self._refresh_token()
             kwargs["headers"] = self._get_headers()
-            response = requests.request(method.upper(), url, **kwargs)
+            response = requests.request(method.upper(), url, **kwargs)  # noqa: S113 - timeout is set through kwargs.setdefault above
 
         response.raise_for_status()
         return response
@@ -139,7 +148,7 @@ class SalesforceDriver(BaseDriver):
 
     def save_meeting(self, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Save meeting to Salesforce as Task record.
-        
+
         Args:
             user_id: User identifier (not used by Salesforce, kept for interface consistency)
             payload: Meeting data
@@ -170,7 +179,7 @@ class SalesforceDriver(BaseDriver):
             }
         except requests.exceptions.RequestException as e:
             detail = self._compact_http_error(e)
-            raise Exception(f"Failed to save meeting to Salesforce: {detail}")
+            raise Exception(f"Failed to save meeting to Salesforce: {detail}") from e
 
     def get_meeting_history(self, user_id: str, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         try:
@@ -202,7 +211,7 @@ class SalesforceDriver(BaseDriver):
             ]
         except requests.exceptions.RequestException as e:
             detail = self._compact_http_error(e)
-            raise Exception(f"Failed to retrieve meeting history from Salesforce: {detail}")
+            raise Exception(f"Failed to retrieve meeting history from Salesforce: {detail}") from e
 
     async def get_schema_info(self) -> Dict[str, Any]:
         try:
@@ -211,7 +220,7 @@ class SalesforceDriver(BaseDriver):
             max_objects = self._normalize_limit(self.config.get("schema_max_objects", 200), default=200)
             if max_objects > 0:
                 sobjects = sobjects[:max_objects]
-            
+
             tables = []
             for sobject in sobjects:
                 obj_name = sobject.get("name")
@@ -228,7 +237,7 @@ class SalesforceDriver(BaseDriver):
                     })
                 except Exception as exc:
                     logger.warning("[Salesforce] schema describe skipped object=%s error=%s", obj_name, exc)
-            
+
             logger.info(f"Introspected {len(tables)} Salesforce objects")
             return {"tables": tables}
         except Exception as e:
@@ -256,7 +265,7 @@ class SalesforceDriver(BaseDriver):
                 json=sf_data,
             )
             result = response.json()
-            
+
             return {
                 "id": result.get("id"),
                 **payload,
@@ -281,7 +290,7 @@ class SalesforceDriver(BaseDriver):
             ]
             fields = ", ".join(["Id"] + safe_fields) if safe_fields else "Id"
             limit = self._normalize_limit((filters or {}).get("limit", 20))
-            
+
             # Data isolation: filter by owned entity IDs at query level (SOQL WHERE clause)
             owned_entity_ids = filters.get("owned_entity_ids", []) if filters else []
             where_clause = ""
@@ -302,7 +311,7 @@ class SalesforceDriver(BaseDriver):
                 params={"q": query},
             )
             records = response.json().get("records", [])
-            
+
             return [
                 {
                     "id": r.get("Id"),
@@ -332,7 +341,7 @@ class SalesforceDriver(BaseDriver):
             logger.info("[Salesforce] update_entity type=%s object=%s id=%s keys=%s", entity_type, sobject_name, entity_id, sorted(sf_data.keys()))
             self._request(
                 "PATCH",
-                f"/services/data/{_API_VERSION}/sobjects/{sobject_name}/{entity_id}",
+                f"/services/data/{_API_VERSION}/sobjects/{sobject_name}/{quote(str(entity_id), safe='')}",
                 json=sf_data,
             )
 
@@ -354,7 +363,9 @@ class SalesforceDriver(BaseDriver):
                 raise ValueError(f"Unsafe Salesforce object name: {sobject_name}")
 
             logger.info("[Salesforce] delete_entity type=%s object=%s id=%s", entity_type, sobject_name, entity_id)
-            response = self._request("DELETE", f"/services/data/{_API_VERSION}/sobjects/{sobject_name}/{entity_id}")
+            response = self._request(
+                "DELETE", f"/services/data/{_API_VERSION}/sobjects/{sobject_name}/{quote(str(entity_id), safe='')}"
+            )
             return response.status_code == 204
         except Exception as e:
             logger.error(f"Failed to delete {entity_type}: {e}")

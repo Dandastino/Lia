@@ -91,3 +91,10 @@ local.properties
 # Unblock mobile source lib from the Python lib/ rule above
 !mobile/src/lib/
 
+
+# Test / coverage output
+coverage.xml
+.ruff_cache/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/

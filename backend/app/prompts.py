@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Literal, Any
+from typing import Any, Dict, Literal
 
 Industry = Literal["medical", "legal", "sales", "generic"]
 
@@ -284,6 +284,4 @@ def build_system_prompt(
 
 
 def build_welcome_message(org_industry: str | None) -> str:
-    labels = get_industry_labels(org_industry)
-    meeting = labels["meeting_label"]
-    return f"Hello! I'm Lia, your AI assistant. How can I help you today?"
+    return "Hello! I'm Lia, your AI assistant. How can I help you today?"

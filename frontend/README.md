@@ -83,3 +83,16 @@ All requests include JWT token in the `Authorization` header.
 - Check browser microphone permissions
 - Ensure WebRTC is enabled
 - Try using HTTPS (required for some browsers)
+
+## Testing
+
+```bash
+npm run lint           # ESLint
+npm test                # Vitest unit/component tests (jsdom)
+npm run test:coverage   # same with v8 coverage and thresholds
+npm run test:e2e        # Playwright; builds, serves with vite preview, mocks the API
+                        # (first time: npx playwright install chromium)
+```
+
+Without `VITE_API_URL` the app calls `/api`, which the Vite dev server proxies to the backend.
+See `docs/UI_UX_AUDIT.md` for the UI/UX and accessibility audit.

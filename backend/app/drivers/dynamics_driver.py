@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-import requests
 import logging
 import re
+from typing import Any, Dict, List, Optional
+from urllib.parse import quote
+
+import requests
+
+from ..security import validate_dynamics_config
 from .base import BaseDriver
 from .sql_driver_common import get_entity_mapping
 
@@ -15,7 +19,7 @@ _SKIP_PAYLOAD_KEYS = {"related_entities", "metadata", "participants"}
 
 class DynamicsDriver(BaseDriver):
     """Microsoft Dynamics 365 API connector.
-    
+
     Security: All API calls use HTTPS with SSL/TLS encryption.
     SSL certificate verification is enabled by default via requests library.
     """
@@ -26,7 +30,7 @@ class DynamicsDriver(BaseDriver):
         self.client_id = self.config.get("client_id")
         self.client_secret = self.config.get("client_secret")
         self.dynamics_url = self.config.get("dynamics_url")
-        
+
         # SSL verification enabled by default, can be disabled for testing (not recommended)
         self.verify_ssl = self.config.get("verify_ssl", True)
         try:
@@ -38,6 +42,10 @@ class DynamicsDriver(BaseDriver):
             raise ValueError(
                 "Dynamics credentials (tenant_id, client_id, client_secret, dynamics_url) are required"
             )
+
+        config_error = validate_dynamics_config(self.tenant_id, self.dynamics_url)
+        if config_error:
+            raise ValueError(config_error)
 
         self.access_token: Optional[str] = None
         self._refresh_token()
@@ -65,7 +73,7 @@ class DynamicsDriver(BaseDriver):
                 raise ValueError("Dynamics OAuth token response did not include access_token")
             logger.info("Dynamics access token refreshed")
         except requests.exceptions.RequestException as e:
-            raise Exception(f"Failed to obtain Dynamics access token: {str(e)}")
+            raise Exception(f"Failed to obtain Dynamics access token: {str(e)}") from e
 
     def _get_headers(self) -> Dict[str, str]:
         return {
@@ -81,12 +89,12 @@ class DynamicsDriver(BaseDriver):
         kwargs.setdefault("verify", self.verify_ssl)
         kwargs.setdefault("timeout", self.request_timeout_seconds)
 
-        response = requests.request(method.upper(), url, **kwargs)
+        response = requests.request(method.upper(), url, **kwargs)  # noqa: S113 - timeout is set through kwargs.setdefault above
         if response.status_code == 401 and retry_on_401:
             logger.warning("Dynamics request unauthorized, refreshing token and retrying once")
             self._refresh_token()
             kwargs["headers"] = self._get_headers()
-            response = requests.request(method.upper(), url, **kwargs)
+            response = requests.request(method.upper(), url, **kwargs)  # noqa: S113 - timeout is set through kwargs.setdefault above
 
         response.raise_for_status()
         return response
@@ -148,7 +156,7 @@ class DynamicsDriver(BaseDriver):
 
     def save_meeting(self, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Save meeting to Dynamics 365 as phone call activity.
-        
+
         Args:
             user_id: User identifier (not used by Dynamics, kept for interface consistency)
             payload: Meeting data
@@ -177,7 +185,7 @@ class DynamicsDriver(BaseDriver):
             }
         except requests.exceptions.RequestException as e:
             detail = self._compact_http_error(e)
-            raise Exception(f"Failed to save meeting to Dynamics: {detail}")
+            raise Exception(f"Failed to save meeting to Dynamics: {detail}") from e
 
     def get_meeting_history(self, user_id: str, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         try:
@@ -205,7 +213,7 @@ class DynamicsDriver(BaseDriver):
             ]
         except requests.exceptions.RequestException as e:
             detail = self._compact_http_error(e)
-            raise Exception(f"Failed to retrieve meeting history from Dynamics: {detail}")
+            raise Exception(f"Failed to retrieve meeting history from Dynamics: {detail}") from e
 
     async def get_schema_info(self) -> Dict[str, Any]:
         try:
@@ -223,7 +231,7 @@ class DynamicsDriver(BaseDriver):
 
             if max_objects > 0:
                 entities = entities[:max_objects]
-            
+
             tables = []
             for entity in entities:
                 entity_name = entity.get("LogicalName")
@@ -242,7 +250,7 @@ class DynamicsDriver(BaseDriver):
                     })
                 except Exception as exc:
                     logger.warning("[Dynamics] schema attributes skipped entity=%s error=%s", entity_name, exc)
-            
+
             logger.info(f"Introspected {len(tables)} Dynamics entities")
             return {"tables": tables}
         except Exception as e:
@@ -270,7 +278,7 @@ class DynamicsDriver(BaseDriver):
                 json=dyn_data,
             )
             entity_id = self._extract_entity_id(response)
-            
+
             return {
                 "id": entity_id,
                 **payload,
@@ -297,13 +305,17 @@ class DynamicsDriver(BaseDriver):
             id_field = mapping.get("id_column", f"{entity_name}id")
             if not isinstance(id_field, str) or not self._is_safe_identifier(id_field):
                 raise ValueError(f"Unsafe Dynamics id column: {id_field}")
-            
+
             # Data isolation: filter by owned entity IDs at query level (OData $filter parameter)
             owned_entity_ids = filters.get("owned_entity_ids", []) if filters else []
             filter_clause = ""
             if owned_entity_ids:
                 id_filters = " or ".join(
-                    [f"{id_field} eq '{self._escape_odata_string(str(entity_id))}'" for entity_id in owned_entity_ids]
+                    [
+                        # percent-encode so '&', '#' or '+' inside an id cannot forge extra query options
+                        f"{id_field} eq '{quote(self._escape_odata_string(str(entity_id)), safe=chr(39))}'"
+                        for entity_id in owned_entity_ids
+                    ]
                 )
                 filter_clause = f"&$filter={id_filters}"
 
@@ -319,7 +331,7 @@ class DynamicsDriver(BaseDriver):
             logger.info("[Dynamics] read_entities type=%s object=%s limit=%s", entity_type, entity_name, limit)
             response = self._request("GET", query)
             records = response.json().get("value", [])
-            
+
             return [
                 {
                     "id": r.get(id_field),
@@ -349,7 +361,7 @@ class DynamicsDriver(BaseDriver):
             logger.info("[Dynamics] update_entity type=%s object=%s id=%s keys=%s", entity_type, entity_name, entity_id, sorted(dyn_data.keys()))
             self._request(
                 "PATCH",
-                f"{_API_BASE}/{entity_name}({entity_id})",
+                f"{_API_BASE}/{entity_name}({quote(str(entity_id), safe='')})",
                 json=dyn_data,
             )
 
@@ -371,7 +383,7 @@ class DynamicsDriver(BaseDriver):
                 raise ValueError(f"Unsafe Dynamics entity name: {entity_name}")
 
             logger.info("[Dynamics] delete_entity type=%s object=%s id=%s", entity_type, entity_name, entity_id)
-            response = self._request("DELETE", f"{_API_BASE}/{entity_name}({entity_id})")
+            response = self._request("DELETE", f"{_API_BASE}/{entity_name}({quote(str(entity_id), safe='')})")
             return response.status_code == 204
         except Exception as e:
             logger.error(f"Failed to delete {entity_type}: {e}")

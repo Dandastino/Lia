@@ -10,19 +10,23 @@ Usage:
   python manage.py user list
 """
 
-import sys
 import argparse
+import getpass
+import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # Add current directory to path for app imports
 sys.path.insert(0, str(Path(__file__).parent))
 
+
+import bcrypt
+from sqlalchemy.orm.attributes import flag_modified
+
 from app import create_app
 from app.extensions import db
-from app.models import Organization, User, UserEntityOwnership, DatabaseDriver
-import bcrypt
-from uuid import UUID
-
+from app.models import DatabaseDriver, Organization, SyncLog, User
+from app.security import ALLOWED_ROLES, is_valid_email, normalize_email, validate_password
 
 app = create_app()
 
@@ -44,7 +48,7 @@ def create_organization(name: str, industry: str = None, connector_type: str = "
             )
             db.session.add(org)
             db.session.commit()
-            print(f"✓ Organization created successfully")
+            print("✓ Organization created successfully")
             print(f"  ID: {org.id}")
             print(f"  Name: {org.name}")
             return org
@@ -56,6 +60,18 @@ def create_organization(name: str, industry: str = None, connector_type: str = "
 
 def create_user(email: str, password: str, org_id: str, role: str = "user"):
     """Create a new user."""
+    email = normalize_email(email)
+    if not is_valid_email(email):
+        print("✗ Invalid email address")
+        return None
+    password_error = validate_password(password)
+    if password_error:
+        print(f"✗ {password_error}")
+        return None
+    if role not in ALLOWED_ROLES:
+        print(f"✗ Invalid role. Choose one of: {', '.join(sorted(ALLOWED_ROLES))}")
+        return None
+
     with app.app_context():
         try:
             # Verify organization exists
@@ -75,7 +91,7 @@ def create_user(email: str, password: str, org_id: str, role: str = "user"):
             db.session.add(user)
             db.session.commit()
 
-            print(f"✓ User created successfully")
+            print("✓ User created successfully")
             print(f"  ID: {user.id}")
             print(f"  Email: {user.email}")
             print(f"  Organization: {org.name}")
@@ -85,6 +101,33 @@ def create_user(email: str, password: str, org_id: str, role: str = "user"):
             print(f"✗ Failed to create user: {e}")
             db.session.rollback()
             return None
+
+
+def encrypt_connectors():
+    """Encrypt connector_config of every organization (requires CONNECTOR_ENCRYPTION_KEY)."""
+    from app.crypto import _get_fernet
+
+    if _get_fernet() is None:
+        print("✗ CONNECTOR_ENCRYPTION_KEY is not set")
+        return
+    with app.app_context():
+        count = 0
+        for org in Organization.query.all():
+            if org.connector_config is not None:
+                # Force a rewrite so the column type encrypts the value.
+                flag_modified(org, "connector_config")
+                count += 1
+        db.session.commit()
+        print(f"✓ Re-saved connector_config for {count} organization(s)")
+
+
+def purge_sync_logs(days: int):
+    """Delete sync logs older than ``days`` days (data retention)."""
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    with app.app_context():
+        deleted = SyncLog.query.filter(SyncLog.created_at < cutoff).delete()
+        db.session.commit()
+        print(f"✓ Deleted {deleted} sync log(s) older than {days} days")
 
 
 def list_organizations():
@@ -164,7 +207,7 @@ def assign_entity_to_user(email: str, entity_type: str, entity_id: str):
             if not user:
                 print(f"✗ User not found: {email}")
                 return
-            
+
             db_driver = DatabaseDriver()
             ownership = db_driver.assign_entity_to_user(
                 user_id=user.id,
@@ -172,7 +215,7 @@ def assign_entity_to_user(email: str, entity_type: str, entity_id: str):
                 entity_type=entity_type,
                 external_entity_id=entity_id,
             )
-            
+
             if ownership:
                 print(f"✓ Assigned {entity_type} '{entity_id}' to {email}")
             else:
@@ -190,14 +233,14 @@ def list_user_entities(email: str, entity_type: str):
             if not user:
                 print(f"✗ User not found: {email}")
                 return
-            
+
             db_driver = DatabaseDriver()
             ownerships = db_driver.get_user_owned_entities_safe(user.id, entity_type)
-            
+
             if not ownerships:
                 print(f"No {entity_type} entities owned by {email}")
                 return
-            
+
             print(f"\nEntities owned by {email} ({entity_type}):")
             print(f"{'Entity ID':<40} {'Created':<30}")
             print("-" * 70)
@@ -216,10 +259,10 @@ def remove_entity_from_user(email: str, entity_type: str, entity_id: str):
             if not user:
                 print(f"✗ User not found: {email}")
                 return
-            
+
             db_driver = DatabaseDriver()
             removed = db_driver.remove_entity_from_user_safe(user.id, entity_type, entity_id)
-            
+
             if removed:
                 print(f"✓ Removed {entity_type} '{entity_id}' from {email}")
             else:
@@ -236,28 +279,28 @@ def main():
 Examples:
   # Create an organization
   python manage.py org create "Acme Corp" --industry "Technology" --connector salesforce
-  
+
   # Create a user
-  python manage.py user create admin@acme.com --password SecurePass123 --org-id <uuid> --role owner
-  
+  python manage.py user create admin@acme.com --org-id <uuid> --role owner   # prompts for the password
+
   # List all organizations
   python manage.py org list
-  
+
   # List all users
   python manage.py user list
-  
+
   # Delete a user
   python manage.py user delete admin@acme.com
-  
+
   # Delete an organization
   python manage.py org delete <uuid>
-  
+
   # Assign a patient to a doctor
   python manage.py entity assign-to-user doctor@clinic.com patient 12345
-  
+
   # List patients owned by a doctor
   python manage.py entity list-owned doctor@clinic.com patient
-  
+
   # Remove patient from doctor
   python manage.py entity remove-from-user doctor@clinic.com patient 12345
         """,
@@ -285,7 +328,7 @@ Examples:
 
     user_create = user_subparsers.add_parser("create", help="Create user")
     user_create.add_argument("email", help="User email")
-    user_create.add_argument("--password", required=True, help="User password")
+    user_create.add_argument("--password", help="User password (prompted when omitted, recommended)")
     user_create.add_argument("--org-id", required=True, help="Organization ID")
     user_create.add_argument("--role", default="user", help="User role (user, admin, owner)")
 
@@ -293,6 +336,11 @@ Examples:
 
     user_delete = user_subparsers.add_parser("delete", help="Delete user")
     user_delete.add_argument("email", help="User email")
+
+    # Maintenance commands
+    subparsers.add_parser("encrypt-connectors", help="Encrypt stored connector credentials")
+    purge_parser = subparsers.add_parser("purge-sync-logs", help="Delete old sync logs (retention)")
+    purge_parser.add_argument("--days", type=int, default=90, help="Keep logs newer than this many days")
 
     # Entity ownership commands
     entity_parser = subparsers.add_parser("entity", help="Entity ownership management (patient assignments, etc.)")
@@ -331,13 +379,20 @@ Examples:
 
     elif args.resource == "user":
         if args.action == "create":
-            create_user(args.email, args.password, args.org_id, args.role)
+            password = args.password or getpass.getpass("Password: ")
+            create_user(args.email, password, args.org_id, args.role)
         elif args.action == "list":
             list_users()
         elif args.action == "delete":
             delete_user(args.email)
         else:
             user_parser.print_help()
+
+    elif args.resource == "encrypt-connectors":
+        encrypt_connectors()
+
+    elif args.resource == "purge-sync-logs":
+        purge_sync_logs(args.days)
 
     elif args.resource == "entity":
         if args.action == "assign-to-user":

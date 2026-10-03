@@ -49,8 +49,8 @@ CREATE TABLE IF NOT EXISTS external_user_mapping (
     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     crm_type VARCHAR(50) NOT NULL,
     external_user_id VARCHAR(500) NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    external_email VARCHAR(255),
+    last_synced_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, crm_type)
 );
 
@@ -66,11 +66,7 @@ CREATE INDEX IF NOT EXISTS idx_external_user_mapping_user_id ON external_user_ma
 CREATE INDEX IF NOT EXISTS idx_external_user_mapping_org_id ON external_user_mapping(org_id);
 CREATE INDEX IF NOT EXISTS idx_external_user_lookup ON external_user_mapping(org_id, crm_type, external_user_id);
 
-INSERT INTO organizations (id, name, industry, connector_type, connector_config) VALUES 
-  ('550e8400-e29b-41d4-a716-446655440001'::UUID, 'Lia Company', 'Technology', 'salesforce', '{"api_version": "v57"}')
-ON CONFLICT DO NOTHING;
-
-INSERT INTO users (org_id, email, password_hash, role, created_at) VALUES
-  ('550e8400-e29b-41d4-a716-446655440001'::UUID, 'admin@lia.no', '$2b$12$2Pxac7KeyY1N92zKml228.MHBvA6Vg/TiHMS8wMuDFbHLB1IV8K7q', 'admin', CURRENT_TIMESTAMP)
-ON CONFLICT DO NOTHING;
--- username: admin@lia.no - password : 4Dm1nL1A
+-- No default organization or user is seeded: shipping a known admin credential is unsafe.
+-- Create the first organization and admin with (password is prompted):
+--   docker compose exec backend python manage.py org create "My Company" --connector internal
+--   docker compose exec backend python manage.py user create admin@example.com --org-id <org-uuid> --role admin

@@ -1,14 +1,16 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
+
+import logging
 import re
 from datetime import date, datetime
 from decimal import Decimal
-from sqlalchemy import inspect as sqlalchemy_inspect
-from livekit.agents import llm
-from ..services.data_manager import DataManager
-from ..drivers.sql_driver_common import resolve_required_columns
+from typing import Any, Dict, List, Optional
 
-import logging
+from livekit.agents import llm
+from sqlalchemy import inspect as sqlalchemy_inspect
+
+from ..drivers.sql_driver_common import resolve_required_columns
+from ..services.data_manager import DataManager
 
 logger = logging.getLogger("middleware_tools")
 TOOLSET_VERSION = "middleware-v2026-03-11-contact-hint-improvements"
@@ -321,7 +323,7 @@ class BaseMiddlewareTools:
                 sorted(list(payload.keys())),
                 sorted(list((payload.get("related_entities") or {}).keys())) if isinstance(payload.get("related_entities"), dict) else [],
             )
-            
+
             result = await dm.create_entity(entity_type, payload)
             logger.info(f"Created record in {entity_type}: {result.get('id')}")
             return self._json_safe(result)
@@ -369,7 +371,7 @@ class BaseMiddlewareTools:
                         table_name=str(table_name),
                         id_column=str(mapping.get("id_column") or "id"),
                     )
-                except Exception:
+                except Exception:  # noqa: S110 - best-effort, failure is expected and handled by the caller
                     # Fallback to mapping metadata when live inspection is unavailable.
                     pass
 
@@ -419,11 +421,11 @@ class BaseMiddlewareTools:
 
         try:
             dm = DataManager.from_user_id(self.user_id)
-            
+
             query_filters: Dict[str, Any] = {
                 "limit": max(1, min(limit, 50)),
             }
-            
+
             user_id = self.user_id if user_only else None
             records = await dm.read_entities(entity_type, user_id, query_filters)
             logger.info(f"Retrieved {len(records)} records from {entity_type}")
@@ -468,7 +470,7 @@ class BaseMiddlewareTools:
 
         try:
             dm = DataManager.from_user_id(self.user_id)
-            
+
             update_payload: Dict[str, Any] = {}
             if isinstance(fields, dict):
                 # Highest priority: explicit external fields requested by the user.
@@ -484,7 +486,7 @@ class BaseMiddlewareTools:
                 return {"error": "No fields provided to update record."}
 
             self._finalize_update_payload(dm, update_payload)
-            
+
             result = await dm.update_entity(entity_type, entity_id, update_payload)
             logger.info(f"Updated record {entity_id} in {entity_type}")
             return self._json_safe(result)

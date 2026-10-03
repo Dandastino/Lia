@@ -1,5 +1,9 @@
 from __future__ import annotations
-import json
+
+import logging
+
+from dotenv import load_dotenv
+from flask import Flask
 from livekit.agents import (
     AutoSubscribe,
     JobContext,
@@ -8,16 +12,13 @@ from livekit.agents import (
 )
 from livekit.agents.voice import Agent, AgentSession
 from livekit.plugins import openai
-from dotenv import load_dotenv
-from flask import Flask
 
 from app.config import build_postgres_uri
 from app.extensions import db
 from app.models import User
-from app.tools.middleware import MiddlewareTools
 from app.prompts import build_system_prompt, build_welcome_message
+from app.tools.middleware import MiddlewareTools
 from app.utils import normalize_user_id, parse_json_metadata
-import logging
 
 load_dotenv()
 
@@ -79,7 +80,7 @@ async def entrypoint(ctx: JobContext):
             org_industry=org_industry,
             extra_rules=prompt_overrides,
         )
-        
+
         # Add welcome message to instructions
         welcome_msg = build_welcome_message(org_industry)
         instructions = f"{welcome_msg}\n\n{system_prompt}"
@@ -109,11 +110,11 @@ async def entrypoint(ctx: JobContext):
             llm=model,
             tools=tools,
         )
-        
+
         # Create and start session
         session = AgentSession()
         await session.start(agent, room=ctx.room)
-        
+
         # Session is now running; the model will respond to speech from the room
         logger.info("Lia Start sucessfully")
 

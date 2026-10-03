@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 import json
-from uuid import UUID
-from typing import Any, Dict, List, Optional
 from datetime import datetime
+from typing import Any, Dict, Optional
+from uuid import UUID
 
 
 def normalize_user_id(raw_user_id: str | None) -> str | None:
     """Normalize user_id from various formats to UUID string.
-    
+
     Handles:
     - None/empty values
     - "User_" prefixed IDs
     - Direct UUID strings
-    
+
     Args:
         raw_user_id: Raw user ID in various formats
-        
+
     Returns:
         Normalized UUID string or None if invalid
     """
@@ -35,10 +35,10 @@ def normalize_user_id(raw_user_id: str | None) -> str | None:
 
 def parse_json_metadata(metadata: Any) -> Dict[str, Any]:
     """Parse metadata that might be a JSON string or already a dict.
-    
+
     Args:
         metadata: Either a JSON string or a dict
-        
+
     Returns:
         Parsed dict, or empty dict if parsing fails
     """
@@ -52,7 +52,7 @@ def parse_json_metadata(metadata: Any) -> Dict[str, Any]:
 
 class MeetingFormatter:
     """Utility for formatting meeting responses consistently across all drivers."""
-    
+
     @staticmethod
     def format_meeting_response(
         meeting_id: Any,
@@ -64,7 +64,7 @@ class MeetingFormatter:
         source: str,
     ) -> Dict[str, Any]:
         """Format a meeting record into standardized response format.
-        
+
         Args:
             meeting_id: Meeting identifier
             title: Meeting title/subject
@@ -73,7 +73,7 @@ class MeetingFormatter:
             metadata: Additional metadata
             created_at: Creation timestamp (datetime or string)
             source: Source system identifier
-            
+
         Returns:
             Standardized meeting dict
         """
@@ -84,7 +84,7 @@ class MeetingFormatter:
             created_at_str = str(created_at)
         else:
             created_at_str = None
-        
+
         return {
             "id": str(meeting_id) if meeting_id else None,
             "title": title,
@@ -98,14 +98,14 @@ class MeetingFormatter:
 
 class QueryFilterBuilder:
     """Utility for building consistent query filters across drivers."""
-    
+
     @staticmethod
     def parse_filters(filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Parse and normalize filter parameters.
-        
+
         Args:
             filters: Raw filter dict from user input
-            
+
         Returns:
             Normalized filter dict with validated values
         """
@@ -116,7 +116,7 @@ class QueryFilterBuilder:
                 "end_date": None,
                 "user_only": True,
             }
-        
+
         return {
             "limit": max(1, min(int(filters.get("limit", 20)), 50)),
             "start_date": filters.get("start_date"),
@@ -125,16 +125,16 @@ class QueryFilterBuilder:
             "owned_entity_ids": filters.get("owned_entity_ids"),
             "external_user_id": filters.get("external_user_id"),
         }
-    
+
     @staticmethod
     def apply_date_filters(query: Any, filters: Dict[str, Any], date_column: Any) -> Any:
         """Apply date range filters to a SQLAlchemy query.
-        
+
         Args:
             query: SQLAlchemy query object
             filters: Parsed filters dict
             date_column: The date column to filter on
-            
+
         Returns:
             Modified query with date filters applied
         """

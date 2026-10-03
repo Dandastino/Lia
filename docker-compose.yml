@@ -36,11 +36,14 @@ services:
       DB_HOST: db
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-lia_db}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev_secret_key_change_in_production}
+      # No default on purpose: the app refuses to start without a real secret (see backend/.env.example).
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env (openssl rand -hex 32)}
+      CONNECTOR_ENCRYPTION_KEY: ${CONNECTOR_ENCRYPTION_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001}
       ENV: ${ENV:-development}
       DEBUG: ${DEBUG:-False}
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     depends_on:
       db:
         condition: service_healthy
@@ -65,6 +68,7 @@ services:
       DB_HOST: db
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-lia_db}
+      CONNECTOR_ENCRYPTION_KEY: ${CONNECTOR_ENCRYPTION_KEY:-}
       ENV: ${ENV:-development}
     depends_on:
       db:

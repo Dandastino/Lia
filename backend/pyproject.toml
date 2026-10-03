@@ -1,0 +1,44 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: needs a real external service (PostgreSQL/MySQL); skipped unless its *_TEST_URL env var is set",
+]
+filterwarnings = ["ignore::DeprecationWarning", "ignore::sqlalchemy.exc.LegacyAPIWarning"]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+omit = ["app/prompts.py"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 85
+skip_empty = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["tests/fixtures"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "C90"]
+ignore = [
+    "E501",   # long lines: handled by the formatter, not enforced
+    "S101",   # assert is fine in tests
+    "UP006", "UP007", "UP035", "UP045",  # codebase supports typing.List/Optional style
+    "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S311", "B011", "S608"]
+# SQL text is assembled only from identifiers that are validated by is_safe_identifier()
+# (schema/query_builder.py) or by the per-module _is_safe_identifier helpers; values are bound.
+"app/drivers/*.py" = ["S608"]
+"app/schema/query_builder.py" = ["S608"]
+"app/services/data_manager.py" = ["S608"]
+"sync_*.py" = ["S608"]  # operator CLI scripts; identifiers come from schema introspection
+
+[tool.ruff.lint.mccabe]
+# Three legacy functions are between 26 and 33: tracked as technical debt in docs/REVIEW_REPORT.md.
+max-complexity = 35

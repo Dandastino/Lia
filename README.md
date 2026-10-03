@@ -10,7 +10,7 @@
 ![OpenAI](https://img.shields.io/badge/LLM-OpenAI-412991?logo=openai&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-4169E1?logo=postgresql&logoColor=white)
 ![Docker](https://img.shields.io/badge/Container-Docker-2496ED?logo=docker&logoColor=white)
-![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)
+![CI](https://github.com/Dandastino/Lia/actions/workflows/ci.yml/badge.svg)
 
 • [📹 Project Demo Video](#project-demo-video) • [🚀 Project Overview](#-project-overview) • [📥 Setup Guide](#setup-guide) • [📖 How to Use](#-how-to-use) • [💡 Optimizations](#-optimizations) • [📃 License](#license)
 
@@ -86,21 +86,24 @@ Key principle: Lia orchestrates workflows and routing, while tenant data remains
 #### Option A: Docker setup (recommended)
 
 1. Clone the repository and go to the root folder.
-2. Create your environment file:
+2. Create the environment files:
 
 ```bash
-cp .env.docker .env
+cp .env.example .env
+cp backend/.env.example backend/.env
 ```
 
-3. Open `.env` and configure required values:
+3. Fill in the **required** secrets (the backend refuses to start without them):
 
-```env
-JWT_SECRET_KEY=your_secret_key_change_this
-LIVEKIT_URL=ws://localhost:7880
-LIVEKIT_API_KEY=your_livekit_api_key
-LIVEKIT_API_SECRET=your_livekit_api_secret
-OPENAI_API_KEY=your_openai_api_key
+```bash
+# JWT signing key (>= 32 chars)
+openssl rand -hex 32
+# key that encrypts tenant connector credentials at rest
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
+
+Put them in `JWT_SECRET_KEY` and `CONNECTOR_ENCRYPTION_KEY` (in both `.env` and `backend/.env`), and add your
+`OPENAI_API_KEY` and `LIVEKIT_*` values. See [backend/.env.example](backend/.env.example) for every option.
 
 4. Build and run all services:
 
@@ -109,11 +112,14 @@ make build
 make up
 ```
 
-5. Check running services:
+5. Create the first organization and admin. **No default account is shipped**; the password is prompted:
 
 ```bash
-make ps
+docker compose exec backend python manage.py org create "My Company" --connector internal
+docker compose exec backend python manage.py user create admin@example.com --org-id <org-uuid> --role admin
 ```
+
+6. Check running services: `make ps`
 
 #### Option B: Local development setup
 
@@ -121,9 +127,10 @@ Backend:
 
 ```bash
 cd backend
-python -m venv myenv
-source myenv/bin/activate
-pip install -r requirements.txt
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
+cp .env.example .env             # then fill it in (see above)
 python server.py
 ```
 
@@ -146,13 +153,12 @@ Default local URLs:
 
 - Frontend: `http://localhost:3000`
 - Backend API: `http://localhost:5000`
-- API Docs: `http://localhost:5000/api/docs`
 
 ## 📖 How to Use
 
 ### Admin flow (step-by-step)
 
-1. Open the frontend at `http://localhost:3000` and log in as admin.
+1. Open the frontend at `http://localhost:3000` and log in with the admin you created with `manage.py`.
 2. Go to the Administration area.
 3. Create an organization and choose its connector type.
 4. Enter connector credentials and save.
@@ -172,6 +178,24 @@ Default local URLs:
 ```text
 Voice input -> Lia processing -> tool call -> DataManager routing -> connector driver -> tenant system
 ```
+
+## ✅ Running the checks
+
+| What | Command |
+|------|---------|
+| Backend lint | `cd backend && ruff check .` |
+| Backend tests + coverage (SQLite, no services needed) | `cd backend && pytest --cov=app` |
+| Backend tests against real PostgreSQL/MySQL | set `POSTGRES_TEST_URL` / `MYSQL_TEST_URL` (see [docs/TESTING.md](docs/TESTING.md)) |
+| Frontend lint / unit / build | `cd frontend && npm ci && npm run lint && npm run test:coverage && npm run build` |
+| Frontend end-to-end | `cd frontend && npm run test:e2e` |
+
+Every pull request runs the same checks in CI; see [docs/CI_CD.md](docs/CI_CD.md).
+
+## 🔐 Security & privacy
+
+- Security model, hardening done and known limitations: [docs/SECURITY.md](docs/SECURITY.md)
+- Personal-data inventory and GDPR gap analysis: [docs/GDPR.md](docs/GDPR.md)
+- Full review report (findings, fixes, remaining debt): [docs/REVIEW_REPORT.md](docs/REVIEW_REPORT.md)
 
 ## 💡 Optimizations
 

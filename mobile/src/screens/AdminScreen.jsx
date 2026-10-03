@@ -184,7 +184,9 @@ export default function AdminScreen({ navigation }) {
         name: editOrgModal.name,
         industry: editOrgModal.industry,
         connector_type: editOrgModal.connector_type,
-        connector_config: editOrgModal.connector_config || {},
+        // Omitted unless edited: the dashboard never returns stored credentials, and sending {}
+        // would wipe them.
+        ...(editOrgModal.connector_config ? { connector_config: editOrgModal.connector_config } : {}),
       });
       showFeedback('Organization updated.');
       setEditOrgModal(null);
