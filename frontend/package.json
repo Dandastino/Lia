@@ -16,7 +16,7 @@
   "dependencies": {
     "@livekit/components-react": "^2.7.0",
     "@livekit/components-styles": "^1.1.4",
-    "@react-three/drei": "^9.95.0",
+    "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^8.15.0",
     "@readyplayerme/visage": "^2.0.0",
     "axios": "^1.6.0",
