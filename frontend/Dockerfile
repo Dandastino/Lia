@@ -1,5 +1,5 @@
 # Build stage
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ COPY frontend/ .
 RUN VITE_API_URL=${VITE_API_URL} npm run build
 
 # Production stage
-FROM node:22-alpine
+FROM node:26-alpine
 
 WORKDIR /app
 
